@@ -55,13 +55,13 @@ head -n "$APPS_START" "$CONFIG_JSON" >"$TMP"
 cat "$APPS_TMP" >>"$TMP"
 tail -n +"$APPS_END" "$CONFIG_JSON" >>"$TMP"
 
-sed -i "s|^\([[:space:]]*\"osVersion\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"\"|" "$TMP"
+sed -i "s|^\([[:space:]]*\"osVersion\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"14\"|" "$TMP"
 sed -i "s|^\([[:space:]]*\"brand\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"$BRAND\"|" "$TMP"
 sed -i "s|^\([[:space:]]*\"device\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"$DEVICE\"|" "$TMP"
 sed -i "s|^\([[:space:]]*\"product\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"$PRODUCT\"|" "$TMP"
 sed -i "s|^\([[:space:]]*\"manufacturer\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"$MANUFACTURER\"|" "$TMP"
 sed -i "s|^\([[:space:]]*\"model\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"$MODEL\"|" "$TMP"
-sed -i "s|^\([[:space:]]*\"mode\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"patch\"|" "$TMP"
+sed -i "s|^\([[:space:]]*\"mode\"[[:space:]]*:[[:space:]]*\)\"[^\"]*\"|\1\"generation\"|" "$TMP"
 
 sed -i "s|\(\"patchLevel\"[[:space:]]*:[[:space:]]*\){[^}]*}|\1{ \"system\": \"system_property\", \"vendor\": \"$VENDOR_PATCH\", \"boot\": \"$VENDOR_PATCH\" }|" "$TMP"
 
