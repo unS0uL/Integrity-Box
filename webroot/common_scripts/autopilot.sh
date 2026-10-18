@@ -1,4 +1,5 @@
 #!/system/bin/sh
+# shellcheck disable=SC1091,SC2181,SC3012
 
 CHECK_INTERVAL=900
 GITHUB="https://raw.githubusercontent.com/MeowDump/Integrity-Box/main/auto-pilot"
@@ -236,6 +237,56 @@ while true; do
                 fi
             else
                 log "No remote emergency"
+            fi
+
+            # Check 2: Upstream Default source monitoring (if current key came from DEFAULT)
+            current_src=$(cat "$BOX_BRAIN/current_key_source" 2>/dev/null || echo "UNKNOWN")
+            current_ser=$(cat "$BOX_BRAIN/current_key_serial" 2>/dev/null | tr -dc '0-9a-fA-F')
+
+            if [ "$current_src" = "DEFAULT" ]; then
+                # Check for silent key update by author via auto-pilot/key-hash
+                remote_hash=$(curl -fsSL --connect-timeout 8 --max-time 10 "https://raw.githubusercontent.com/MeowDump/Integrity-Box/main/auto-pilot/key-hash" 2>/dev/null | tr -dc '0-9a-fA-F')
+                stored_hash=$(cat "$BOX_BRAIN/upstream_default_hash" 2>/dev/null | tr -dc '0-9a-fA-F')
+                if [ "${#remote_hash}" -eq 64 ] && [ "${#stored_hash}" -eq 64 ] && [ "$remote_hash" != "$stored_hash" ]; then
+                    log "UPSTREAM ROTATION: Author updated default key-hash on GitHub ($stored_hash -> $remote_hash)!"
+                    echo "$remote_hash" > "$BOX_BRAIN/upstream_default_hash" 2>/dev/null
+                    execute "DEFAULT_HASH_UPDATED"
+                fi
+
+                # Check if author flagged key status as revoked (Status: 🔴🔴🔴)
+                status_text=$(curl -fsSL --connect-timeout 8 --max-time 10 "https://raw.githubusercontent.com/MeowDump/Integrity-Box/refs/heads/main/keybox/key-status" 2>/dev/null)
+                if printf '%s' "$status_text" | grep -q '🔴🔴🔴'; then
+                    log "UPSTREAM REVOCATION: Author flagged default key as revoked (🔴🔴🔴)!"
+                    if [ -n "$current_ser" ] && ! grep -Fxq "$current_ser" "$BOX_BRAIN/banned_serials.txt" 2>/dev/null; then
+                        echo "$current_ser" >> "$BOX_BRAIN/banned_serials.txt" 2>/dev/null
+                    fi
+                    execute "DEFAULT_REVOKED"
+                fi
+            fi
+
+            # Check 3: Community Catalog Proactive Health Audit
+            # Applies to ANY key (Spectre, Default, or Custom) if serial exists in catalog
+            if [ -n "$current_ser" ]; then
+                cat_tmp="$BOX_BRAIN/catalog_check.json"
+                if curl -fsSL --connect-timeout 8 --max-time 15 "https://rawbin.dpejoh.com/catalog" -o "$cat_tmp" 2>/dev/null; then
+                    entry=$(sed 's/},{/}\n{/g' "$cat_tmp" 2>/dev/null | grep "\"serial\":\"$current_ser\"" | head -n 1)
+                    if [ -n "$entry" ]; then
+                        if grep -Fxq "$current_ser" "$BOX_BRAIN/banned_serials.txt" 2>/dev/null; then
+                            log "CATALOG AUDIT: Serial $current_ser is already in banned list (freeze/survival mode active). Skipping redundant rotation."
+                        elif printf '%s\n' "$entry" | grep -q '"revoked":true'; then
+                            log "PROACTIVE ROTATION: Current serial $current_ser revoked in catalog!"
+                            echo "$current_ser" >> "$BOX_BRAIN/banned_serials.txt" 2>/dev/null
+                            execute "PROACTIVE_REVOKED"
+                        elif printf '%s\n' "$entry" | grep -q '"softbanned":true'; then
+                            log "CATALOG AUDIT: Current serial $current_ser is softbanned in catalog."
+                        else
+                            log "CATALOG AUDIT: Current serial $current_ser is healthy in catalog."
+                        fi
+                    else
+                        log "CATALOG AUDIT: Serial $current_ser not indexed in catalog (source: $current_src). Upstream monitoring active."
+                    fi
+                    rm -f "$cat_tmp" 2>/dev/null
+                fi
             fi
         else
             log "Network unavailable"

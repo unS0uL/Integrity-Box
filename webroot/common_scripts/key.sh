@@ -20,7 +20,8 @@ TRICKY_STORE="/data/adb/tricky_store"
 KEYBOX="$TRICKY_STORE/keybox.xml"
 LOG_DIR="$RECORD/Integrity-Box-Logs"
 LOG_FILE="$LOG_DIR/keybox.log"
-TEMP_FILE="$(mktemp -p /data/local/tmp 2>/dev/null || echo "/data/local/tmp/keybox_dl_$$")"
+TEMP_DIR="$RECORD/.tmp"
+TEMP_FILE="$TEMP_DIR/keybox_dl_$$"
 CLEANUP="$MODPATH/webroot/common_scripts/cleanup.sh"
 UCLEANUP="$UPDATEPATH/webroot/common_scripts/cleanup.sh"
 BACKUP_DIR="$RECORD/KeyBackup"
@@ -45,10 +46,10 @@ log() {
 }
 
 # Cleanup temp files on exit
-trap 'rm -f "$TEMP_FILE" "${TEMP_FILE}".* 2>/dev/null' EXIT HUP INT TERM
+trap 'rm -rf "$TEMP_DIR" 2>/dev/null' EXIT HUP INT TERM
 
 # Create directories
-mkdir -p "$TRICKY_STORE" "$RECORD" "$LOG_DIR" "$BACKUP_DIR" 2>/dev/null
+mkdir -p "$TRICKY_STORE" "$RECORD" "$LOG_DIR" "$BACKUP_DIR" "$TEMP_DIR" 2>/dev/null
 touch "$LOG_FILE" "$BANNED_FILE" 2>/dev/null
 
 # Backup existing keybox with timestamp if valid
@@ -234,6 +235,7 @@ try_spectre_source() {
         if validate_keybox_xml "$dec_tmp"; then
             mv -f "$dec_tmp" "$KEYBOX" 2>/dev/null
             chmod 600 "$KEYBOX" 2>/dev/null
+            [ -n "$ser" ] && echo "$ser" > "$RECORD/current_key_serial" 2>/dev/null
             local ksize
             ksize=$(wc -c < "$KEYBOX" 2>/dev/null | tr -d ' ')
             log " ✦ Successfully installed keybox from Spectre ($src v$ver, $ksize bytes)"
@@ -252,13 +254,39 @@ try_spectre_source() {
     return 1
 }
 
+# Record keybox origin metadata for Autopilot
+record_keybox_metadata() {
+    local src="$1"
+    echo "$src" > "$RECORD/current_key_source" 2>/dev/null
+    date +%s > "$RECORD/current_key_time" 2>/dev/null
+
+    # Extract DeviceID / Serial directly from the keybox XML
+    local dev_id
+    dev_id=$(sed -n 's/.*<Keybox DeviceID="\([^"]*\)".*/\1/p' "$KEYBOX" 2>/dev/null | head -n 1)
+    if [ -n "$dev_id" ]; then
+        echo "$dev_id" > "$RECORD/current_key_serial" 2>/dev/null
+    fi
+
+    # Record SHA256 checksum
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$KEYBOX" 2>/dev/null | awk '{print $1}' > "$RECORD/current_key_hash" 2>/dev/null
+    fi
+
+    # If Default source was used, record upstream hash baseline
+    if [ "$src" = "DEFAULT" ]; then
+        download_url "https://raw.githubusercontent.com/MeowDump/Integrity-Box/main/auto-pilot/key-hash" "$RECORD/upstream_default_hash" 10
+    fi
+}
+
 # Main Execution Flow
 success=0
+installed_source="UNKNOWN"
 
 # Step 1: If default source is NOT disabled, attempt it first
 if [ ! -f "$DISABLE_DEFAULT" ]; then
     if try_default_source; then
         success=1
+        installed_source="DEFAULT"
     fi
 else
     log " ✦ Default source disabled by user configuration, using Spectre directly"
@@ -268,6 +296,7 @@ fi
 if [ "$success" -eq 0 ]; then
     if try_spectre_source; then
         success=1
+        installed_source="SPECTRE"
     fi
 fi
 
@@ -279,11 +308,13 @@ if [ "$success" -eq 0 ]; then
     if validate_keybox_xml "$KEYBOX"; then
         log " ✦ [ZERO-KEY PROTECTION] Preserving current working keybox (Freeze Mode). Keybox NOT wiped."
         success=1
+        installed_source="BACKUP"
     elif [ -s "$KEYBOX_BACKUP" ] && validate_keybox_xml "$KEYBOX_BACKUP"; then
         cp -f "$KEYBOX_BACKUP" "$KEYBOX" 2>/dev/null
         chmod 600 "$KEYBOX" 2>/dev/null
         log " ✦ [ZERO-KEY PROTECTION] Restored known valid backup keybox from $KEYBOX_BACKUP"
         success=1
+        installed_source="BACKUP"
     else
         # Search for any valid backup in KeyBackup directory
         found_bak=""
@@ -300,6 +331,7 @@ if [ "$success" -eq 0 ]; then
             chmod 600 "$KEYBOX" 2>/dev/null
             log " ✦ [ZERO-KEY PROTECTION] Restored valid archive from $found_bak"
             success=1
+            installed_source="BACKUP"
         else
             log " ✦ [FATAL] No valid keybox found and all sources exhausted"
             touch "$RECORD/emergency_no_keys" 2>/dev/null
@@ -307,6 +339,9 @@ if [ "$success" -eq 0 ]; then
         fi
     fi
 fi
+
+# Record keybox origin metadata for Autopilot
+record_keybox_metadata "$installed_source"
 
 # Step 4: Mirror keybox to other modules if present
 chmod 600 "$KEYBOX" 2>/dev/null
@@ -334,14 +369,26 @@ elif [ -f "$UCLEANUP" ]; then
     sh "$UCLEANUP" >/dev/null 2>&1
 fi
 
-# Step 6: Restart Google Services so changes take effect immediately
-for proc in com.google.android.gms.unstable com.google.android.gms com.android.vending; do
+# Step 6: Restart Google Services and Wallet so changes take effect immediately
+for proc in com.google.android.gms.unstable com.google.android.gms com.android.vending com.google.android.apps.walletnfcrel; do
     if type kill_process >/dev/null 2>&1; then
         kill_process "$proc" >/dev/null 2>&1
     elif command -v killall >/dev/null 2>&1; then
         killall "$proc" 2>/dev/null
     fi
 done
+
+# Clear Google Wallet / Pay and DroidGuard database cache so new verdicts apply immediately
+rm -rf /data/data/com.google.android.gms/app_dg_cache/* 2>/dev/null
+rm -f /data/data/com.google.android.gms/databases/dg.db* 2>/dev/null
+rm -f /data/data/com.google.android.gms/databases/*pay* 2>/dev/null
+rm -f /data/data/com.google.android.gms/databases/wallet_object* 2>/dev/null
+
+# Background Google Wallet TapAndPay warmup
+if command -v am >/dev/null 2>&1; then
+    am broadcast -a com.google.android.gms.tapandpay.ACTION_TOKEN_STATUS_CHANGED >/dev/null 2>&1
+    am start-service -n com.google.android.gms/.tapandpay.service.TapAndPayService >/dev/null 2>&1
+fi
 
 # Step 7: Update description in module.prop
 if [ -f "$FILE" ]; then
