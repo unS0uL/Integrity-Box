@@ -1,4 +1,5 @@
 #!/system/bin/sh
+# shellcheck disable=SC3043,SC1091
 
 MODPATH="/data/adb/modules/playintegrityfix"
 UPDATEPATH="/data/adb/modules_update/playintegrityfix"
@@ -17,294 +18,336 @@ fi
 RECORD="/data/adb/Box-Brain"
 TRICKY_STORE="/data/adb/tricky_store"
 KEYBOX="$TRICKY_STORE/keybox.xml"
-LOG_FILE="$RECORD/Integrity-Box-Logs/keybox.log"
-TEMP_FILE="$(mktemp -p /data/local/tmp)"
+LOG_DIR="$RECORD/Integrity-Box-Logs"
+LOG_FILE="$LOG_DIR/keybox.log"
+TEMP_FILE="$(mktemp -p /data/local/tmp 2>/dev/null || echo "/data/local/tmp/keybox_dl_$$")"
 CLEANUP="$MODPATH/webroot/common_scripts/cleanup.sh"
 UCLEANUP="$UPDATEPATH/webroot/common_scripts/cleanup.sh"
 BACKUP_DIR="$RECORD/KeyBackup"
 TIMESTAMP=$(date '+%Y%m%d_%H%M%S')
 KEYBOX_BACKUP="$BACKUP_DIR/keybox_$TIMESTAMP.xml"
-FILE="/data/adb/modules/playintegrityfix/module.prop"
-DESC=$(grep '^description=' "$FILE" | sed 's| ✦ Synced on .*||' | cut -d= -f2-)
+FILE="$MODPATH/module.prop"
 NOW=$(date '+%d %B %I:%M %p')
 SIM_KEY="/data/adb/teesim/keybox.xml"
+SIM_KEYBACKUP="$BACKUP_DIR/spectre_teesim_keybox_$TIMESTAMP.xml"
+DISABLE_DEFAULT="$RECORD/disable-default-source"
+BANNED_FILE="$RECORD/banned_serials.txt"
+
+# Spectre API endpoints
+SPECTRE_BASE_URL="https://rawbin.dpejoh.com/key"
+SPECTRE_CATALOG_URL="https://rawbin.dpejoh.com/catalog"
+
+# Default source URL
+KEYBOX_URL="https://raw.githubusercontent.com/MeowDump/MeowDump/refs/heads/main/Megatron"
 
 log() {
     echo "$*" | tee -a "$LOG_FILE"
 }
 
 # Cleanup temp files on exit
-trap 'rm -f "$TEMP_FILE"' EXIT
+trap 'rm -f "$TEMP_FILE" "${TEMP_FILE}".* 2>/dev/null' EXIT HUP INT TERM
 
 # Create directories
-mkdir -p "$TRICKY_STORE" "$RECORD" "$RECORD/Integrity-Box-Logs" "$BACKUP_DIR"
-touch "$LOG_FILE"
+mkdir -p "$TRICKY_STORE" "$RECORD" "$LOG_DIR" "$BACKUP_DIR" 2>/dev/null
+touch "$LOG_FILE" "$BANNED_FILE" 2>/dev/null
 
-# Get busybox path
-BB=$(P)
-
-# Backup existing keybox with timestamp
-if [ -s "$KEYBOX" ]; then
-    cp -f "$KEYBOX" "$KEYBOX_BACKUP"
-    log " 𒀭 Backed up default keybox"
+# Backup existing keybox with timestamp if valid
+if [ -s "$KEYBOX" ] && grep -q '<Keybox' "$KEYBOX" 2>/dev/null; then
+    cp -f "$KEYBOX" "$KEYBOX_BACKUP" 2>/dev/null
+    log " 𒀭 Backed up current keybox to $KEYBOX_BACKUP"
 fi
 
-# Keybox download URL
-KEYBOX_URL="https://raw.githubusercontent.com/MeowDump/MeowDump/refs/heads/main/Megatron"
-
-# Known GitHub raw CDN IPs (round-robin fallback)
-GITHUB_IPS="185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133"
-
-# Core download helper: tries one method with timeout
-_try_download() {
+# Universal downloader
+download_url() {
     local url="$1"
     local out="$2"
-    local dl_tool="$3"
+    local timeout="${3:-15}"
+    rm -f "$out" 2>/dev/null
 
-    rm -f "$out"
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsSL --connect-timeout 8 --max-time "$timeout" --insecure "$url" -o "$out" 2>/dev/null
+        [ -s "$out" ] && return 0
+    fi
 
-    case "$dl_tool" in
-        bb_wget)
-            [ -n "$BB" ] && "$BB" wget -q --no-check-certificate -T 15 -t 1 -O "$out" "$url" 2>/dev/null
-            ;;
-        wget)
-            wget -q --no-check-certificate --timeout=15 --tries=1 -O "$out" "$url" 2>/dev/null
-            ;;
-        curl)
-            curl -fsSL --connect-timeout 15 --max-time 120 --insecure "$url" -o "$out" 2>/dev/null
-            ;;
-        curl_resolve)
-            # curl with forced Host header (direct IP access)
-            local ip="$4"
-            curl -fsSL --connect-timeout 15 --max-time 120 --insecure \
-                 -H "Host: raw.githubusercontent.com" \
-                 "https://$ip/MeowDump/MeowDump/refs/heads/main/Megatron" \
-                 -o "$out" 2>/dev/null
-            ;;
-    esac
+    if command -v wget >/dev/null 2>&1; then
+        wget -q --no-check-certificate --timeout="$timeout" --tries=2 -O "$out" "$url" 2>/dev/null
+        [ -s "$out" ] && return 0
+    fi
 
-    [ -s "$out" ]
-}
-
-# Normal download with retries and backoff
-_phase1_normal() {
-    local url="$1"
-    local out="$2"
-    local attempt=0
-
-    while [ "$attempt" -lt 3 ]; do
-        attempt=$((attempt + 1))
-        log " 𒀭 Stock download (attempt $attempt/3)..."
-
-        if [ -n "$BB" ] && _try_download "$url" "$out" "bb_wget"; then return 0; fi
-        if _try_download "$url" "$out" "wget"; then return 0; fi
-        if _try_download "$url" "$out" "curl"; then return 0; fi
-
-        sleep "$attempt"
-    done
     return 1
 }
 
-# Temporarily override DNS and retry
-_phase2_dns_override() {
-    local url="$1"
-    local out="$2"
-    local attempt=0
+# Validate if an XML file is a genuine Keybox
+validate_keybox_xml() {
+    local file="$1"
+    [ -s "$file" ] || return 1
+    local size
+    size=$(wc -c < "$file" 2>/dev/null | tr -d ' ')
+    [ "${size:-0}" -ge 1024 ] || return 1
+    grep -q '<Keybox' "$file" 2>/dev/null && grep -q '<CertificateChain' "$file" 2>/dev/null
+}
 
-    log " 𒀭 Trying with public DNS..."
+# Attempt download and decoding from Default source (Megatron)
+try_default_source() {
+    log " 𒀭 Checking Default Keybox source..."
+    local dl_target="${TEMP_FILE}.default"
 
-    # Save current DNS (best effort)
-    local old_dns1 old_dns2
-    old_dns1=$(getprop net.dns1 2>/dev/null)
-    old_dns2=$(getprop net.dns2 2>/dev/null)
+    if ! download_url "$KEYBOX_URL" "$dl_target" 20; then
+        log " ✦ Default source download failed or returned 404"
+        rm -f "$dl_target" 2>/dev/null
+        return 1
+    fi
 
-    # Set public DNS temporarily
-    setprop net.dns1 8.8.8.8
-    setprop net.dns2 1.1.1.1
-    setprop net.dns3 8.8.4.4
-    sleep 2
+    # Check if download is an HTML 404 error
+    if grep -qi "404" "$dl_target" 2>/dev/null && [ "$(wc -c < "$dl_target" 2>/dev/null | tr -d ' ')" -lt 200 ]; then
+        log " ✦ Default source returned 404 Not Found"
+        rm -f "$dl_target" 2>/dev/null
+        return 1
+    fi
 
-    while [ "$attempt" -lt 2 ]; do
-        attempt=$((attempt + 1))
-        log " 𒀭 DNS override attempt $attempt/2..."
-
-        if [ -n "$BB" ] && _try_download "$url" "$out" "bb_wget"; then
-            _restore_dns "$old_dns1" "$old_dns2"
-            return 0
+    # Decode Megatron: 10x Base64 > Hex > ROT13
+    local cur="$dl_target"
+    local iter=0
+    while [ "$iter" -lt 10 ]; do
+        iter=$((iter + 1))
+        local nxt="${TEMP_FILE}.b64.$iter"
+        if ! base64 -d "$cur" > "$nxt" 2>/dev/null; then
+            rm -f "$nxt" "$cur" 2>/dev/null
+            log " ✦ Default source decode failed at iteration $iter"
+            return 1
         fi
-        if _try_download "$url" "$out" "wget"; then
-            _restore_dns "$old_dns1" "$old_dns2"
-            return 0
-        fi
-        if _try_download "$url" "$out" "curl"; then
-            _restore_dns "$old_dns1" "$old_dns2"
-            return 0
-        fi
-
-        sleep 2
+        rm -f "$cur" 2>/dev/null
+        cur="$nxt"
     done
 
-    _restore_dns "$old_dns1" "$old_dns2"
-    return 1
-}
+    local hex_out="${TEMP_FILE}.hex"
+    if ! command -v xxd >/dev/null 2>&1 || ! xxd -r -p "$cur" > "$hex_out" 2>/dev/null; then
+        rm -f "$cur" "$hex_out" 2>/dev/null
+        log " ✦ Default source hex decode failed"
+        return 1
+    fi
+    rm -f "$cur" 2>/dev/null
 
-_restore_dns() {
-    [ -n "$1" ] && setprop net.dns1 "$1"
-    [ -n "$2" ] && setprop net.dns2 "$2"
-}
+    local decoded_xml="${TEMP_FILE}.xml"
+    if ! tr 'A-Za-z' 'N-ZA-Mn-za-m' < "$hex_out" > "$decoded_xml" 2>/dev/null; then
+        rm -f "$hex_out" "$decoded_xml" 2>/dev/null
+        log " ✦ Default source ROT13 decode failed"
+        return 1
+    fi
+    rm -f "$hex_out" 2>/dev/null
 
-# Direct IP connection (bypass DNS entirely)
-_phase3_direct_ip() {
-    local out="$1"
-    local attempt=0
-
-    log " 𒀭 Trying direct GitHub CDN IPs..."
-
-    for ip in $GITHUB_IPS; do
-        attempt=$((attempt + 1))
-        log " 𒀭 Trying IP $ip ($attempt/4)..."
-
-        if _try_download "" "$out" "curl_resolve" "$ip"; then return 0; fi
-        sleep 1
-    done
-    return 1
-}
-
-# Master fail-safe download orchestrator
-fail_safe_download() {
-    local url="$1"
-    local out="$2"
-
-    # Normal retries
-    if _phase1_normal "$url" "$out"; then
-        log " 𒀭 Download succeeded"
+    if validate_keybox_xml "$decoded_xml"; then
+        mv -f "$decoded_xml" "$KEYBOX" 2>/dev/null
+        chmod 600 "$KEYBOX" 2>/dev/null
+        log " ✦ Default source successfully decoded and installed"
         return 0
     fi
 
-    # DNS override
-    if _phase2_dns_override "$url" "$out"; then
-        log " 𒀭 Download succeeded (DNS override)"
-        return 0
-    fi
-
-    # Direct IP
-    if _phase3_direct_ip "$out"; then
-        log " 𒀭 Download succeeded (Direct IP)"
-        return 0
-    fi
-
-    log " 𒀭 ERROR: All download phases exhausted"
+    rm -f "$decoded_xml" 2>/dev/null
     return 1
 }
 
-# Flag-based download switch
-if [ -f "$RECORD/keyswitch" ]; then
-    if ! fail_safe_download "$KEYBOX_URL" "$TEMP_FILE"; then
-        log " 𒀭 ERROR: Download failed - check internet/DNS"
-        rm -f "$TEMP_FILE"
-        exit 3
+# Attempt download and decoding from Spectre Catalog
+try_spectre_source() {
+    log " ✦ Querying Spectre catalog for healthy keybox..."
+    local cat_tmp="${TEMP_FILE}.catalog"
+    local entries_tmp="${TEMP_FILE}.entries"
+
+    if ! download_url "$SPECTRE_CATALOG_URL" "$cat_tmp" 15; then
+        log " ✦ Failed to acquire Spectre catalog"
+        rm -f "$cat_tmp" 2>/dev/null
+        return 1
+    fi
+
+    # Parse JSON entries
+    if ! tr -d '\r\n' < "$cat_tmp" 2>/dev/null |
+        sed -n 's/.*"entries":\[\(.*\)\],"latest".*/\1/p' |
+        sed 's/},{/}\n{/g' > "$entries_tmp" 2>/dev/null || [ ! -s "$entries_tmp" ]; then
+        log " ✦ Failed to parse Spectre catalog entries"
+        rm -f "$cat_tmp" "$entries_tmp" 2>/dev/null
+        return 1
+    fi
+    rm -f "$cat_tmp" 2>/dev/null
+
+    # Filter entries: revoked=false and softbanned=false
+    local eligible_list="${TEMP_FILE}.eligible"
+    awk '/"revoked":false/ && /"softbanned":false/ { print }' "$entries_tmp" > "$eligible_list" 2>/dev/null
+
+    # If no strict clean entries, allow softbanned=true as secondary fallback
+    if [ ! -s "$eligible_list" ]; then
+        awk '/"revoked":false/ { print }' "$entries_tmp" > "$eligible_list" 2>/dev/null
+    fi
+    rm -f "$entries_tmp" 2>/dev/null
+
+    if [ ! -s "$eligible_list" ]; then
+        log " ✦ Spectre catalog contains no eligible (unrevoked) entries"
+        rm -f "$eligible_list" 2>/dev/null
+        return 1
+    fi
+
+    # Iterate through candidates and find the first working key not in local blacklist
+    local std_alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+    local shuffled_alphabet='1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe'
+    local found_key=0
+
+    while IFS= read -r entry || [ -n "$entry" ]; do
+        [ -z "$entry" ] && continue
+
+        local src ver ser
+        src=$(printf '%s\n' "$entry" | sed -n 's/.*"source":"\([^"]*\)".*/\1/p')
+        ver=$(printf '%s\n' "$entry" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')
+        ser=$(printf '%s\n' "$entry" | sed -n 's/.*"serial":"\([^"]*\)".*/\1/p')
+
+        [ -z "$src" ] || [ -z "$ver" ] && continue
+
+        # Check local blacklist
+        if [ -n "$ser" ] && grep -Fxq "$ser" "$BANNED_FILE" 2>/dev/null; then
+            log " ✦ Skipping locally banned serial: $ser ($src v$ver)"
+            continue
+        fi
+
+        log " ✦ Trying Spectre key: $src v$ver (serial: ${ser:-unknown})..."
+        local payload_url="${SPECTRE_BASE_URL}/${src}/${ver}"
+        local enc_tmp="${TEMP_FILE}.enc"
+        local b64_tmp="${TEMP_FILE}.b64"
+        local dec_tmp="${TEMP_FILE}.dec"
+
+        if ! download_url "$payload_url" "$enc_tmp" 15; then
+            log " ✦ Download failed for $src v$ver"
+            rm -f "$enc_tmp" 2>/dev/null
+            continue
+        fi
+
+        # Alphabet conversion and Base64 decode
+        if ! tr "$shuffled_alphabet" "$std_alphabet" < "$enc_tmp" > "$b64_tmp" 2>/dev/null; then
+            rm -f "$enc_tmp" "$b64_tmp" 2>/dev/null
+            continue
+        fi
+        rm -f "$enc_tmp" 2>/dev/null
+
+        if ! base64 -d "$b64_tmp" > "$dec_tmp" 2>/dev/null; then
+            rm -f "$b64_tmp" "$dec_tmp" 2>/dev/null
+            continue
+        fi
+        rm -f "$b64_tmp" 2>/dev/null
+
+        if validate_keybox_xml "$dec_tmp"; then
+            mv -f "$dec_tmp" "$KEYBOX" 2>/dev/null
+            chmod 600 "$KEYBOX" 2>/dev/null
+            local ksize
+            ksize=$(wc -c < "$KEYBOX" 2>/dev/null | tr -d ' ')
+            log " ✦ Successfully installed keybox from Spectre ($src v$ver, $ksize bytes)"
+            found_key=1
+            break
+        fi
+
+        rm -f "$dec_tmp" 2>/dev/null
+    done < "$eligible_list"
+
+    if [ "$found_key" -eq 1 ]; then
+        return 0
+    fi
+
+    log " ✦ All Spectre candidates exhausted"
+    return 1
+}
+
+# Main Execution Flow
+success=0
+
+# Step 1: If default source is NOT disabled, attempt it first
+if [ ! -f "$DISABLE_DEFAULT" ]; then
+    if try_default_source; then
+        success=1
     fi
 else
-    # download
-    log " 𒀭 Fetching keybox from GitHub..."
-    if [ -n "$BB" ] && "$BB" wget --help >/dev/null 2>&1; then
-        "$BB" wget -q --no-check-certificate -O "$TEMP_FILE" "$KEYBOX_URL"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -q --no-check-certificate -O "$TEMP_FILE" "$KEYBOX_URL"
-    elif command -v curl >/dev/null 2>&1; then
-        curl -fsSL --insecure "$KEYBOX_URL" -o "$TEMP_FILE"
+    log " ✦ Default source disabled by user configuration, using Spectre directly"
+fi
+
+# Step 2: Fallback to Spectre if Default source failed or was disabled
+if [ "$success" -eq 0 ]; then
+    if try_spectre_source; then
+        success=1
+    fi
+fi
+
+# Step 3: Zero-Key Protection (Survival Mode)
+if [ "$success" -eq 0 ]; then
+    log " ✦ [ALERT] All remote key sources failed or returned revoked keys"
+
+    # Check if the existing keybox on device is valid
+    if validate_keybox_xml "$KEYBOX"; then
+        log " ✦ [ZERO-KEY PROTECTION] Preserving current working keybox (Freeze Mode). Keybox NOT wiped."
+        success=1
+    elif [ -s "$KEYBOX_BACKUP" ] && validate_keybox_xml "$KEYBOX_BACKUP"; then
+        cp -f "$KEYBOX_BACKUP" "$KEYBOX" 2>/dev/null
+        chmod 600 "$KEYBOX" 2>/dev/null
+        log " ✦ [ZERO-KEY PROTECTION] Restored known valid backup keybox from $KEYBOX_BACKUP"
+        success=1
     else
-        log " 𒀭 ERROR: No downloader available (wget or curl)"
-        exit 2
+        # Search for any valid backup in KeyBackup directory
+        found_bak=""
+        for b in "$BACKUP_DIR"/keybox_*.xml "$BACKUP_DIR"/spectre_*.xml; do
+            [ -f "$b" ] || continue
+            if validate_keybox_xml "$b"; then
+                found_bak="$b"
+                break
+            fi
+        done
+
+        if [ -n "$found_bak" ]; then
+            cp -f "$found_bak" "$KEYBOX" 2>/dev/null
+            chmod 600 "$KEYBOX" 2>/dev/null
+            log " ✦ [ZERO-KEY PROTECTION] Restored valid archive from $found_bak"
+            success=1
+        else
+            log " ✦ [FATAL] No valid keybox found and all sources exhausted"
+            touch "$RECORD/emergency_no_keys" 2>/dev/null
+            exit 1
+        fi
     fi
 fi
 
-# Check download succeeded
-if [ ! -s "$TEMP_FILE" ]; then
-    log " 𒀭 ERROR: Download failed - check internet connection"
-    rm -f "$TEMP_FILE"
-    exit 3
+# Step 4: Mirror keybox to other modules if present
+chmod 600 "$KEYBOX" 2>/dev/null
+
+# OMK
+OMK_DIR="/data/misc/keystore/omk"
+if [ -d "$OMK_DIR" ]; then
+    cp -f "$KEYBOX" "$OMK_DIR/keybox.xml" 2>/dev/null
+    chmod 600 "$OMK_DIR/keybox.xml" 2>/dev/null
+    log " ✪ Keybox synchronized to OMK"
 fi
 
-# Decode the downloaded file
-# The file is encoded as: base64 > hex > ROT13
-log " 𒀭 Decoding keybox file..."
+# TEESimulator (legacy mirror if directory exists)
+if [ -d "/data/adb/teesim" ]; then
+    [ -s "$SIM_KEY" ] && cp -f "$SIM_KEY" "$SIM_KEYBACKUP" 2>/dev/null
+    cp -f "$KEYBOX" "$SIM_KEY" 2>/dev/null
+    chmod 600 "$SIM_KEY" 2>/dev/null
+    log " ✪ Keybox synchronized to TEESimulator"
+fi
 
-TMP_HEX="$(mktemp -p /data/local/tmp)"
+# Step 5: Clean temporary files
+if [ -f "$CLEANUP" ]; then
+    sh "$CLEANUP" >/dev/null 2>&1
+elif [ -f "$UCLEANUP" ]; then
+    sh "$UCLEANUP" >/dev/null 2>&1
+fi
 
-# Base64 decode 
-CURRENT="$TEMP_FILE"
-for i in $(seq 1 10); do
-    NEXT="$(mktemp -p /data/local/tmp)"
-    if ! base64 -d "$CURRENT" > "$NEXT" 2>/dev/null; then
-        log " 𒀭 ERROR: Base64 decode failed at iteration $i"
-        rm -f "$NEXT" "$TMP_HEX"
-        exit 4
+# Step 6: Restart Google Services so changes take effect immediately
+for proc in com.google.android.gms.unstable com.google.android.gms com.android.vending; do
+    if type kill_process >/dev/null 2>&1; then
+        kill_process "$proc" >/dev/null 2>&1
+    elif command -v killall >/dev/null 2>&1; then
+        killall "$proc" 2>/dev/null
     fi
-    rm -f "$CURRENT"
-    CURRENT="$NEXT"
 done
 
-# Hex decode
-if ! xxd -r -p "$CURRENT" > "$TMP_HEX" 2>/dev/null; then
-    log " 𒀭 ERROR: Hex decoding failed"
-    rm -f "$CURRENT" "$TMP_HEX"
-    exit 5
-fi
-rm -f "$CURRENT"
-
-# ROT13 decode
-if ! tr 'A-Za-z' 'N-ZA-Mn-za-m' < "$TMP_HEX" > "$KEYBOX"; then
-    log " 𒀭 ERROR: ROT13 decoding failed"
-    rm -f "$TMP_HEX"
-    exit 6
-fi
-rm -f "$TMP_HEX"
-
-# Verify final keybox file
-if [ ! -s "$KEYBOX" ]; then
-    log " 𒀭 ERROR: Keybox is empty after decoding"
-    rm -f "$KEYBOX"
-    if [ -s "$KEYBOX_BACKUP" ]; then
-        cp -f "$KEYBOX_BACKUP" "$KEYBOX"
-        log " 𒀭 Restored backup keybox from $KEYBOX_BACKUP"
-    fi
-    exit 7
+# Step 7: Update description in module.prop
+if [ -f "$FILE" ]; then
+    DESC=$(grep '^description=' "$FILE" 2>/dev/null | sed 's| ✦ Synced on .*||' | cut -d= -f2-)
+    [ -n "$DESC" ] && sed -i "s|^description=.*|description=$DESC ✦ Synced on $NOW|" "$FILE" 2>/dev/null
 fi
 
-log " 𒀭 Keybox successfully updated"
-
-# Clean temporary files
-if [ -f "$CLEANUP" ]; then
-  sh "$CLEANUP" > /dev/null 2>&1
-elif [ -f "$UCLEANUP" ]; then
-  sh "$UCLEANUP" > /dev/null 2>&1
-fi
-
-# OMK Keybox Support
-OMK_DIR="/data/misc/keystore/omk"
-OMK_KEYBOX="$OMK_DIR/keybox.xml"
-OMK_KEYBOX_BAK="$OMK_DIR/keybox.xml.bak"
-
-if [ -d "$OMK_DIR" ]; then
-    if [ -s "$OMK_KEYBOX" ]; then
-        cp -f "$OMK_KEYBOX" "$OMK_KEYBOX_BAK"
-        log " ✪ OMK key backup created"
-    fi
-    cp -f "$KEYBOX" "$OMK_KEYBOX"
-    log " ✪ Keybox added to OMK directory"
-fi
-
-# Backup TEE SIM keybox with timestamp
-if [ -s "$SIM_KEY" ]; then
-    cp -f "$SIM_KEY" "$SIM_KEYBACKUP"
-    log " ✪ TEE-SIM key backup created"
-fi
-
-# Copy keybox to SIM path
-if [ -d "/data/adb/teesim" ] && [ -s "$KEYBOX" ]; then
-    cp -f "$KEYBOX" "$SIM_KEY"
-    log " ✪ Keybox added to TEEsim directory"
-fi
-
-sed -i "s|^description=.*|description=$DESC ✦ Synced on $NOW|" "$FILE"
+log " 𒀭 Keybox operation completed successfully at $NOW"
+exit 0
