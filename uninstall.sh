@@ -1,4 +1,9 @@
 #!/system/bin/sh
+# Stop the supervised worker before any config or module deletion.
+MODDIR=${0%/*}
+if ! sh "$MODDIR/webroot/common_scripts/autopilot.sh" disable; then
+    exit 1
+fi
 set -x
 
 # Log file & Logger

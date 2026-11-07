@@ -189,20 +189,7 @@ cleanup_gapps_logs() {
 
 download_keybox() {
   MODPATH="${0%/*}"
-  BOX="/data/adb/Box-Brain"
-
-  SCRIPT_DIR="$MODPATH/webroot/common_scripts"
-  UNOFFICIAL="$BOX/disable-default-source"
-  PRIMARY="$SCRIPT_DIR/key.sh"
-  SECONDARY="$SCRIPT_DIR/spectre.sh"
-
-  if [ -f "$UNOFFICIAL" ]; then
-    sh "$SECONDARY" || { sleep 10; exit 1; }
-  else
-    sh "$PRIMARY" || { sleep 10; exit 1; }
-  fi
-
-  echo " "
+  sh "$MODPATH/webroot/common_scripts/autopilot.sh" run-once
 }
 
 update_targets() {

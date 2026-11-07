@@ -1,0 +1,788 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
+	"encoding/xml"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func fixture(t *testing.T, expired bool) []byte {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	root := &x509.Certificate{SerialNumber: big.NewInt(42), Subject: pkix.Name{CommonName: "test root"}, NotBefore: now.Add(-time.Hour), NotAfter: now.Add(365 * 24 * time.Hour), IsCA: true, BasicConstraintsValid: true, KeyUsage: x509.KeyUsageCertSign}
+	rd, err := x509.CreateCertificate(rand.Reader, root, root, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rc, _ := x509.ParseCertificate(rd)
+	end := now.Add(48 * time.Hour)
+	if expired {
+		end = now.Add(-time.Minute)
+	}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "test"}, NotBefore: now.Add(-time.Hour), NotAfter: end, KeyUsage: x509.KeyUsageDigitalSignature}
+	ld, err := x509.CreateCertificate(rand.Reader, leaf, rc, &key.PublicKey, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	kd, _ := x509.MarshalECPrivateKey(key)
+	return []byte(fmt.Sprintf("<AndroidAttestation><NumberOfKeyboxes>1</NumberOfKeyboxes><Keybox><Key algorithm=\"ecdsa\"><PrivateKey>%s</PrivateKey><CertificateChain><NumberOfCertificates>2</NumberOfCertificates><Certificate>%s</Certificate><Certificate>%s</Certificate></CertificateChain></Key></Keybox></AndroidAttestation>", pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ld}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rd})))
+}
+func TestInspect(t *testing.T) {
+	for _, expired := range []bool{false, true} {
+		b := fixture(t, expired)
+		h, e := inspect(b, time.Now())
+		if e != nil {
+			t.Fatal(e)
+		}
+		want := "valid"
+		if expired {
+			want = "expired"
+		}
+		if h.State != want || h.Serials[0] != "7" {
+			t.Fatalf("%+v", h)
+		}
+	}
+}
+func TestRejectMalformed(t *testing.T) {
+	for _, b := range [][]byte{nil, []byte("<Keybox/>"), []byte("<!DOCTYPE foo><AndroidAttestation/>"), append(fixture(t, false), []byte("<other/>")...), make([]byte, maxXML+1)} {
+		if _, e := inspect(b, time.Now()); e == nil {
+			t.Fatal("accepted invalid input")
+		}
+	}
+}
+func TestRejectMismatch(t *testing.T) {
+	a, b := fixture(t, false), fixture(t, false)
+	start := strings.Index(string(b), "<PrivateKey>")
+	end := strings.Index(string(b), "</PrivateKey>")
+	s := string(a)
+	s = s[:strings.Index(s, "<PrivateKey>")] + string(b[start:end]) + s[strings.Index(s, "</PrivateKey>"):]
+	if _, e := inspect([]byte(s), time.Now()); e == nil {
+		t.Fatal("accepted key mismatch")
+	}
+}
+func TestOfficialRoundTrip(t *testing.T) {
+	data := fixture(t, false)
+	b := append([]byte(nil), data...)
+	for i, c := range b {
+		if c >= 'a' && c <= 'z' {
+			b[i] = 'a' + (c-'a'+13)%26
+		}
+		if c >= 'A' && c <= 'Z' {
+			b[i] = 'A' + (c-'A'+13)%26
+		}
+	}
+	b = []byte(hex.EncodeToString(b))
+	for i := 0; i < 10; i++ {
+		b = []byte(base64.StdEncoding.EncodeToString(b))
+	}
+	got, e := decodeOfficial(b)
+	if e != nil || string(got) != string(data) {
+		t.Fatal(e)
+	}
+}
+func TestLock(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "lock")
+	a, e := lock(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if b, e := lock(p); e == nil {
+		b.Close()
+		t.Fatal("double lock")
+	}
+	a.Close()
+	b, e := lock(p)
+	if e != nil {
+		t.Fatal(e)
+	}
+	b.Close()
+}
+func TestAtomic(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "file")
+	if e := atomic(p, []byte("old"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	if e := atomic(p, []byte("new"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	b, _ := os.ReadFile(p)
+	if string(b) != "new" {
+		t.Fatal("bad atomic")
+	}
+}
+func TestURLPolicy(t *testing.T) {
+	e := Engine{}
+	for _, u := range []string{"http://github.com/a", "https://evil.example/a", "https://x@github.com/a"} {
+		if _, err := e.get(context.Background(), u, 20); err == nil {
+			t.Fatal("URL accepted")
+		}
+	}
+}
+func TestBackoffCap(t *testing.T) {
+	for i := 0; i < 100; i++ {
+		if backoff(i) > 12*time.Hour || backoff(i) < 30*time.Minute {
+			t.Fatal("bad backoff")
+		}
+	}
+}
+func TestUnknownClock(t *testing.T) {
+	h, e := inspect(fixture(t, false), time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
+	if e != nil || h.State != "time_unknown" {
+		t.Fatal(h, e)
+	}
+}
+func TestCommitConflict(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	os.WriteFile(e.target(), []byte("original"), 0600)
+	if err := e.install([]byte("replacement"), "wrong", generation(dir), false); err == nil {
+		t.Fatal("lost update accepted")
+	}
+	b, _ := os.ReadFile(e.target())
+	if string(b) != "original" {
+		t.Fatal("changed")
+	}
+}
+
+func TestUntrustedRoot(t *testing.T) {
+	h, err := inspect(fixture(t, false), time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if trusted(h) {
+		t.Fatal("self-signed arbitrary root trusted")
+	}
+}
+
+func TestAndroidTransaction(t *testing.T) {
+	if !exists("/system/bin/chcon") {
+		t.Skip("Android-only SELinux transaction test")
+	}
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	before := fixture(t, true)
+	after := fixture(t, false)
+	if err := os.WriteFile(e.target(), before, 0644); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(before)
+	if err := e.install(after, hex.EncodeToString(sum[:]), generation(dir), false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(e.target())
+	if err != nil || !bytes.Equal(got, after) {
+		t.Fatal("commit mismatch", err)
+	}
+	backup, err := os.ReadFile(filepath.Join(dir, "keybox.autopilot-backup.xml"))
+	if err != nil || !bytes.Equal(backup, before) {
+		t.Fatal("backup mismatch", err)
+	}
+	// Simulate crash after first rename with journal still present.
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	bp := filepath.Join(td, "before-0")
+	os.WriteFile(bp, before, 0600)
+	label, err := fileContext(e.target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := transaction{Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-test"), Backup: bp, Context: label, Mode: 0644, UID: 0, GID: 0, Existed: true}}}
+	if err := writeJSON(filepath.Join(td, "journal.json"), tx); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.recoverTransaction(); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = os.ReadFile(e.target())
+	if !bytes.Equal(got, before) {
+		t.Fatal("recovery mismatch")
+	}
+}
+func TestSecondaryRoundTrip(t *testing.T) {
+	const shuffled = "1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe"
+	const std = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	source := fixture(t, false)
+	b := []byte(base64.StdEncoding.EncodeToString(source))
+	for i, c := range b {
+		j := strings.IndexByte(std, c)
+		if j >= 0 {
+			b[i] = shuffled[j]
+		}
+	}
+	result, err := decodeSecondary(b)
+	if err != nil || !bytes.Equal(result, source) {
+		t.Fatal("secondary decode", err)
+	}
+}
+func TestCancelledHTTP(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	e := Engine{client: &http.Client{}}
+	if _, err := e.get(ctx, "https://github.com/a", 20); err == nil {
+		t.Fatal("ignored cancellation")
+	}
+}
+
+type responseFunc func(*http.Request) (*http.Response, error)
+
+func reply(status int, b []byte) *http.Response {
+	return &http.Response{StatusCode: status, Header: make(http.Header), Body: io.NopCloser(bytes.NewReader(b))}
+}
+func secondaryEncode(data []byte) []byte {
+	const shuffled = "1dgWnocayqxU3r6vA5lCIPYfHmkV08b4tz+KMsp2NQ9LRXihODwSj7BEFJ/ZuGTe"
+	const std = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	b := []byte(base64.StdEncoding.EncodeToString(data))
+	for i, c := range b {
+		if j := strings.IndexByte(std, c); j >= 0 {
+			b[i] = shuffled[j]
+		}
+	}
+	return b
+}
+func trustFixture(t *testing.T, b []byte) {
+	t.Helper()
+	var doc Document
+	xml.Unmarshal(b, &doc)
+	chain := doc.Boxes[0].Keys[0].Certificates
+	old := rootBundle
+	rootBundle, _ = json.Marshal([]string{chain[len(chain)-1]})
+	t.Cleanup(func() { rootBundle = old })
+}
+func TestSecondarySkips404(t *testing.T) {
+	b := fixture(t, false)
+	trustFixture(t, b)
+	calls := []string{}
+	e := Engine{}
+	e.request = func(r *http.Request) (*http.Response, error) {
+		calls = append(calls, r.URL.Path)
+		switch r.URL.Path {
+		case "/catalog":
+			return reply(200, []byte(`{"entries":[{"source":"TAKR","version":"37","revoked":false,"softbanned":false},{"source":"TAKR","version":"36","revoked":false,"softbanned":false}]}`)), nil
+		case "/key/TAKR/37":
+			return reply(404, nil), nil
+		default:
+			return reply(200, secondaryEncode(b)), nil
+		}
+	}
+	got, _, err := e.secondary(context.Background())
+	if err != nil || !bytes.Equal(got, b) || len(calls) != 3 {
+		t.Fatal(calls, err)
+	}
+}
+func TestSecondaryBudget(t *testing.T) {
+	n := 0
+	e := Engine{}
+	e.request = func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/catalog" {
+			entries := []map[string]any{}
+			for i := 0; i < 100; i++ {
+				entries = append(entries, map[string]any{"source": "TAKR", "version": fmt.Sprint(i), "revoked": false, "softbanned": false})
+			}
+			b, _ := json.Marshal(map[string]any{"entries": entries})
+			return reply(200, b), nil
+		}
+		n++
+		return reply(404, nil), nil
+	}
+	_, _, err := e.secondary(context.Background())
+	if err == nil || n != 5 {
+		t.Fatal(n, err)
+	}
+}
+func TestRetryAfterAndConditional(t *testing.T) {
+	n := 0
+	e := Engine{}
+	e.request = func(r *http.Request) (*http.Response, error) {
+		n++
+		r1 := reply(429, nil)
+		r1.Header.Set("Retry-After", "8640000")
+		return r1, nil
+	}
+	e.get(context.Background(), "https://github.com/a", 100)
+	e.get(context.Background(), "https://github.com/b", 100)
+	if n != 1 || time.Until(e.hostNext["github.com"]) > 24*time.Hour {
+		t.Fatal("cooldown")
+	}
+	e = Engine{}
+	e.request = func(r *http.Request) (*http.Response, error) {
+		if r.Header.Get("If-None-Match") == "tag" {
+			return reply(304, nil), nil
+		}
+		r1 := reply(200, []byte("cached"))
+		r1.Header.Set("ETag", "tag")
+		return r1, nil
+	}
+	for i := 0; i < 2; i++ {
+		b, err := e.get(context.Background(), "https://rawbin.dpejoh.com/catalog", 100)
+		if err != nil || string(b) != "cached" {
+			t.Fatal(err)
+		}
+	}
+}
+func TestPayloadByteLimit(t *testing.T) {
+	e := Engine{request: func(*http.Request) (*http.Response, error) { return reply(200, make([]byte, 101)), nil }}
+	if _, err := e.get(context.Background(), "https://github.com/a", 100); err == nil {
+		t.Fatal("byte cap ignored")
+	}
+}
+func TestCappedBuffer(t *testing.T) {
+	b := &cappedBuffer{limit: 10}
+	if _, err := b.Write(make([]byte, 11)); err == nil || b.Len() != 0 {
+		t.Fatal("cap")
+	}
+}
+
+func TestConfigChangePreservesTarget(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	old := fixture(t, false)
+	os.WriteFile(e.target(), old, 0600)
+	sum := sha256.Sum256(old)
+	gen := generation(dir)
+	os.WriteFile(filepath.Join(dir, "disable-default-source"), nil, 0600)
+	if err := e.install(fixture(t, false), hex.EncodeToString(sum[:]), gen, false); err == nil {
+		t.Fatal("configuration race")
+	}
+	got, _ := os.ReadFile(e.target())
+	if !bytes.Equal(got, old) {
+		t.Fatal("changed target")
+	}
+}
+func TestSameContentDoesNotInstall(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	old := fixture(t, false)
+	os.WriteFile(e.target(), old, 0600)
+	sum := sha256.Sum256(old)
+	if err := e.install(old, hex.EncodeToString(sum[:]), generation(dir), false); !errors.Is(err, errUnchanged) {
+		t.Fatal(err)
+	}
+	if exists(filepath.Join(dir, ".autopilot-transaction")) {
+		t.Fatal("unnecessary transaction")
+	}
+}
+func TestFailedSearchPreservesTarget(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir, request: func(*http.Request) (*http.Response, error) { return reply(404, nil), nil }}
+	old := fixture(t, true)
+	trustFixture(t, old)
+	os.WriteFile(e.target(), old, 0600)
+	e.timeCheck = func(context.Context) error { return nil }
+	if err := e.cycle(context.Background(), false); err == nil {
+		t.Fatal("expected failure")
+	}
+	got, _ := os.ReadFile(e.target())
+	if !bytes.Equal(got, old) {
+		t.Fatal("target lost")
+	}
+}
+func TestSymlinkTargetRejected(t *testing.T) {
+	dir := t.TempDir()
+	actual := filepath.Join(dir, "real")
+	os.WriteFile(actual, []byte("old"), 0600)
+	os.Symlink(actual, filepath.Join(dir, "keybox.xml"))
+	e := Engine{root: dir, ram: dir, brain: dir}
+	if err := e.install([]byte("new"), "", generation(dir), false); err == nil {
+		t.Fatal("symlink accepted")
+	}
+	got, _ := os.ReadFile(actual)
+	if string(got) != "old" {
+		t.Fatal("changed symlink destination")
+	}
+}
+func TestJitterBound(t *testing.T) {
+	for i := 0; i < 1000; i++ {
+		d := jitter(12 * time.Hour)
+		if d > 12*time.Hour || d < 108*time.Hour/10 {
+			t.Fatal(d)
+		}
+	}
+}
+func TestSuspendClock(t *testing.T) {
+	if !exists("/proc/uptime") {
+		t.Skip("Linux-only boottime")
+	}
+	if bootSeconds() <= 0 {
+		t.Fatal("invalid boottime")
+	}
+	if processStart(os.Getpid()) == "" {
+		t.Fatal("process ownership unavailable")
+	}
+}
+
+func TestSupervisorCancellationAndSingleton(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "autopilot"), nil, 0600)
+	e := Engine{root: dir, ram: dir, brain: dir, workerCommand: func() *exec.Cmd { return exec.Command("sleep", "100") }}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- e.supervise(ctx) }()
+	deadline := time.Now().Add(time.Second)
+	for !held(filepath.Join(dir, "supervisor.lock")) {
+		if time.Now().After(deadline) {
+			t.Fatal("supervisor failed to acquire lock")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	if err := e.supervise(ctx); err != nil {
+		t.Fatal(err)
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not stop")
+	}
+	if held(filepath.Join(dir, "supervisor.lock")) {
+		t.Fatal("lock leaked")
+	}
+}
+
+func TestModuleDisableStopsEligibility(t *testing.T) {
+	dir := t.TempDir()
+	brain := t.TempDir()
+	e := Engine{moduleRoot: dir, brain: brain}
+	os.WriteFile(filepath.Join(brain, "autopilot"), nil, 0600)
+	if !e.enabled() {
+		t.Fatal("not enabled")
+	}
+	for _, flag := range []string{"disable", "remove"} {
+		os.WriteFile(filepath.Join(dir, flag), nil, 0600)
+		if e.enabled() {
+			t.Fatal("module flag ignored", flag)
+		}
+		os.Remove(filepath.Join(dir, flag))
+	}
+	os.Remove(dir)
+	if e.enabled() {
+		t.Fatal("deleted module still enabled")
+	}
+}
+
+func TestRecoveryPreflightsAllBackups(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	os.WriteFile(e.target(), []byte("current"), 0600)
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	first := filepath.Join(td, "before-0")
+	os.WriteFile(first, []byte("old"), 0600)
+	tx := transaction{Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-one"), Backup: first, Existed: true}, {Target: filepath.Join(dir, "keybox2.xml"), Stage: filepath.Join(dir, ".autopilot-stage-two"), Backup: filepath.Join(td, "missing"), Existed: true}}}
+	writeJSON(filepath.Join(td, "journal.json"), tx)
+	if err := e.recoverTransaction(); err == nil {
+		t.Fatal("missing backup accepted")
+	}
+	got, _ := os.ReadFile(e.target())
+	if string(got) != "current" {
+		t.Fatal("partial rollback before preflight")
+	}
+	if !exists(filepath.Join(td, "journal.json")) {
+		t.Fatal("journal lost")
+	}
+}
+func TestCRLOnlyDoesNotFetchBeforeDeadline(t *testing.T) {
+	dir := t.TempDir()
+	old := fixture(t, true)
+	trustFixture(t, old)
+	os.WriteFile(filepath.Join(dir, "keybox.xml"), old, 0600)
+	calls := 0
+	e := Engine{root: dir, ram: dir, brain: dir, timeCheck: func(context.Context) error { return nil }, automaticFetchDue: bootSeconds() + 12*3600, request: func(r *http.Request) (*http.Response, error) {
+		calls++
+		if r.URL.Path != "/attestation/status" {
+			t.Fatal("early replacement request", r.URL)
+		}
+		return reply(200, []byte(`{"entries":{}}`)), nil
+	}}
+	if err := e.cycle(context.Background(), true); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatal(calls)
+	}
+}
+
+func TestNetworkClockPolicy(t *testing.T) {
+	now := time.UnixMilli(1794065434746)
+	boot := 653173.342
+	good := "NetworkTimeSuggestion{mUnixEpochTime=UnixEpochTime{mElapsedRealtimeMillis=653173342, mUnixEpochTimeMillis=1794065434746}, mUncertaintyMillis=24,"
+	if err := verifyNetworkTime(good, now, boot); err != nil {
+		t.Fatal(err)
+	}
+	for _, at := range []time.Time{now.Add(24 * time.Hour), now.Add(-24 * time.Hour)} {
+		if verifyNetworkTime(good, at, boot) == nil {
+			t.Fatal("clock jump accepted")
+		}
+	}
+	if verifyNetworkTime(good, now, boot+25*3600) == nil {
+		t.Fatal("stale clock accepted")
+	}
+	if verifyNetworkTime("unsupported", now, boot) == nil {
+		t.Fatal("unsupported output accepted")
+	}
+}
+
+func TestRecoveryRejectsCorruptBackup(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	os.WriteFile(e.target(), []byte("current"), 0600)
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	p := filepath.Join(td, "before-0")
+	os.WriteFile(p, []byte("corrupted"), 0600)
+	tx := transaction{Version: 1, ID: "test", Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-one"), Backup: p, Existed: true, BackupSHA256: "incorrect", BackupBytes: 9}}}
+	writeJSON(filepath.Join(td, "journal.json"), tx)
+	if e.recoverTransaction() == nil {
+		t.Fatal("corrupted backup accepted")
+	}
+	b, _ := os.ReadFile(e.target())
+	if string(b) != "current" {
+		t.Fatal("target changed")
+	}
+}
+
+func TestConfigRevisionDetectsABA(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{ram: dir, brain: dir}
+	before := generation(dir)
+	if err := e.setFlag(context.Background(), "disable-default-source", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.setFlag(context.Background(), "disable-default-source", false); err != nil {
+		t.Fatal(err)
+	}
+	if generation(dir) == before {
+		t.Fatal("ABA not detected")
+	}
+}
+
+func TestDiagnosticTailBoundAndClassification(t *testing.T) {
+	d := &diagnosticTail{}
+	d.Write(make([]byte, 20000))
+	d.Write([]byte("panic: private-data-must-not-be-logged"))
+	if len(d.data) > 8192 || d.class() != "panic" {
+		t.Fatal("bad diagnostic tail")
+	}
+}
+
+func TestSeventyTwoHourCRLAndSearchSeparation(t *testing.T) {
+	dir := t.TempDir()
+	old := fixture(t, true)
+	trustFixture(t, old)
+	os.WriteFile(filepath.Join(dir, "keybox.xml"), old, 0600)
+	now := 1000000.0
+	fetches := 0
+	crls := 0
+	e := Engine{root: dir, ram: dir, brain: dir, bootClock: func() float64 { return now }, timeCheck: func(context.Context) error { return nil }}
+	e.request = func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/attestation/status" {
+			crls++
+			v := reply(200, []byte(`{"entries":{}}`))
+			v.Header.Set("Cache-Control", "max-age=1800")
+			return v, nil
+		}
+		fetches++
+		return reply(404, nil), nil
+	}
+	failures := 0
+	for tick := 0; tick <= 144; tick++ {
+		now = 1000000 + float64(tick*1800)
+		due := e.automaticFetchDue
+		e.searched = false
+		err := e.cycle(context.Background(), true)
+		if now < due && e.searched {
+			t.Fatal("CRL bypassed search cooldown")
+		}
+		failures = e.recordSearchResult(err, failures)
+	}
+	if crls != 145 || fetches < 15 || fetches > 39 {
+		t.Fatal("unexpected requests", crls, fetches)
+	}
+	got, _ := os.ReadFile(e.target())
+	if !bytes.Equal(got, old) {
+		t.Fatal("working file changed")
+	}
+}
+
+func TestMain(m *testing.M) { diagnosticSink = func(string, string, int) {}; os.Exit(m.Run()) }
+
+func TestRevocationUrgencyDoesNotResetRepeatedly(t *testing.T) {
+	dir := t.TempDir()
+	old := fixture(t, true)
+	trustFixture(t, old)
+	os.WriteFile(filepath.Join(dir, "keybox.xml"), old, 0600)
+	now := 2000.0
+	e := Engine{root: dir, ram: dir, brain: dir, bootClock: func() float64 { return now }, timeCheck: func(context.Context) error { return nil }, automaticFetchDue: 40000, lastSearchBoot: 1900, request: func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path == "/attestation/status" {
+			return reply(200, []byte(`{"entries":{"7":{"status":"REVOKED"}}}`)), nil
+		}
+		return reply(404, nil), nil
+	}}
+	if err := e.cycle(context.Background(), true); err != nil || e.searched || e.automaticFetchDue != 3700 {
+		t.Fatal(err, e.automaticFetchDue)
+	}
+	now = 3700
+	e.searched = false
+	err := e.cycle(context.Background(), true)
+	if err == nil || !e.searched {
+		t.Fatal("urgent search missing")
+	}
+	e.recordSearchResult(err, 3)
+	deadline := e.automaticFetchDue
+	now = 4000
+	e.searched = false
+	e.cycle(context.Background(), true)
+	if e.searched || e.automaticFetchDue != deadline {
+		t.Fatal("same revoke event bypassed cooldown")
+	}
+}
+func TestStartupRecoveryBeforeFrameworkAndPowerGate(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	tx := transaction{Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-one"), Backup: filepath.Join(td, "missing"), Existed: true}}}
+	writeJSON(filepath.Join(td, "journal.json"), tx)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if e.daemon(ctx) == nil || e.status.Phase != "recovery_required" || e.status.Ready {
+		t.Fatal("startup bypassed broken recovery", e.status.Phase)
+	}
+}
+
+func TestEmergencyAnchorRecognitionSurvivesRestart(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	data := fixture(t, false)
+	trustFixture(t, data)
+	os.WriteFile(e.target(), data, 0600)
+	sum := sha256.Sum256(data)
+	hash := hex.EncodeToString(sum[:])
+	if err := e.rememberAnchor(hash); err != nil {
+		t.Fatal(err)
+	}
+	restarted := Engine{root: dir, ram: t.TempDir(), brain: dir}
+	if !restarted.health().Anchor {
+		t.Fatal("anchor lost on restart")
+	}
+	if restarted.isKnownAnchor(strings.Repeat("0", 64)) {
+		t.Fatal("unrelated file considered anchor")
+	}
+}
+
+func TestUpgradeFromLongLivedAnchorAllowsShorterValidReplacement(t *testing.T) {
+	e := Engine{status: Status{Revocation: "fresh", Local: Health{State: "valid", Anchor: true, Fingerprint: "old", Expires: time.Now().Add(5 * 365 * 24 * time.Hour)}}}
+	replacement := Health{State: "valid", Fingerprint: "new", Expires: time.Now().Add(48 * time.Hour)}
+	if !e.eligible(replacement) {
+		t.Fatal("anchor permanently blocks upgrade")
+	}
+	replacement.Anchor = true
+	if e.eligible(replacement) {
+		t.Fatal("anchor to anchor churn")
+	}
+	replacement.Anchor = false
+	e.status.Revocation = "unknown"
+	if e.eligible(replacement) {
+		t.Fatal("uncertain replacement downgrades working anchor")
+	}
+}
+
+func TestDisableDoesNotHidePendingRecoveryFailure(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	tx := transaction{Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-one"), Backup: filepath.Join(td, "missing"), Existed: true}}}
+	writeJSON(filepath.Join(td, "journal.json"), tx)
+	if e.disable(context.Background()) == nil {
+		t.Fatal("disable reported success with broken recovery")
+	}
+	if !exists(filepath.Join(td, "journal.json")) {
+		t.Fatal("recovery evidence deleted")
+	}
+}
+func TestAndroidDisableCompletesPendingRecovery(t *testing.T) {
+	if !exists("/system/bin/chcon") {
+		t.Skip("Android-only rollback labels")
+	}
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	before := fixture(t, true)
+	after := fixture(t, false)
+	os.WriteFile(e.target(), after, 0644)
+	contextName, err := fileContext(e.target())
+	if err != nil {
+		t.Fatal(err)
+	}
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	bp := filepath.Join(td, "before-0")
+	os.WriteFile(bp, before, 0600)
+	tx := transaction{Entries: []transactionEntry{{Target: e.target(), Stage: filepath.Join(dir, ".autopilot-stage-one"), Backup: bp, Existed: true, Mode: 0644, Context: contextName, UID: 0, GID: 0}}}
+	writeJSON(filepath.Join(td, "journal.json"), tx)
+	if err = e.disable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(e.target())
+	if !bytes.Equal(got, before) || exists(filepath.Join(td, "journal.json")) {
+		t.Fatal("disable left partial update")
+	}
+}
+
+func TestLocalAuditDeadlineCoversExpiryAndRenewalBoundary(t *testing.T) {
+	now := time.Now()
+	for _, d := range []time.Duration{10 * time.Minute, 10 * time.Hour, 35 * time.Hour} {
+		h := Health{State: "valid", Expires: now.Add(d)}
+		got := localAuditDeadline(h, now)
+		want := h.Expires
+		if d > 24*time.Hour {
+			want = h.Expires.Add(-24 * time.Hour)
+		}
+		if !got.Equal(want) {
+			t.Fatal(d, got, want)
+		}
+	}
+	if !localAuditDeadline(Health{State: "expired", Expires: now.Add(-time.Minute)}, now).IsZero() {
+		t.Fatal("expired key creates repeated immediate deadline")
+	}
+}
+func TestManualReplacementChangesAuditSignature(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir}
+	os.WriteFile(e.target(), []byte("one"), 0600)
+	before := e.targetSignature()
+	tmp := filepath.Join(dir, "new")
+	os.WriteFile(tmp, []byte("two"), 0600)
+	os.Rename(tmp, e.target())
+	if e.targetSignature() == before {
+		t.Fatal("manual import not noticed")
+	}
+}

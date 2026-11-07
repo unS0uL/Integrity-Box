@@ -43,7 +43,7 @@ check_integrity() {
 setup_environment() {
     debug " ✦ Setting up Environment "
     debug " "
-    chmod +x "$SCRIPT/key.sh"
+    chmod 755 "$SCRIPT/bin/box-autopilot" "$SCRIPT/autopilot.sh" "$SCRIPT/key.sh" "$SCRIPT/spectre.sh" || exit 1
     sh "$SCRIPT/key.sh"
     debug " "
 }
@@ -281,7 +281,7 @@ display_footer() {
 }
 
 install_module() {
-#    check_integrity
+    # Package verification runs before any bundled helper or content mutation.
     prepare_directories
     handle_module_props
     boot_configuration
@@ -295,6 +295,8 @@ install_module() {
     release_source
 }
 
+# Verify the extracted package before executing its helpers or changing files.
+check_integrity
 chmod +x "$MODPATH/hello.sh"
 sh "$MODPATH/hello.sh"
 

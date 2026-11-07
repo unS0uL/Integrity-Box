@@ -529,20 +529,26 @@ function render(){
     return;
   }
   
-  list.innerHTML=allFiles.map(f=>`
-    <div class="file-item" onclick="loadFile('${f.path}')">
-      <div class="file-icon">
-        <span class="material-icons-round">description</span>
-      </div>
-      <div class="file-info">
-        <div class="file-name">${f.name}</div>
-        <div class="file-meta">${(f.size/1024).toFixed(1)} KB • ${new Date(f.ts*1000).toLocaleDateString()}</div>
-      </div>
-      <div class="load-arrow">
-        <span class="material-icons-round">arrow_forward</span>
-      </div>
-    </div>
-  `).join('');
+  list.replaceChildren();
+  for (const f of allFiles) {
+    const item = document.createElement('div');
+    item.className = 'file-item';
+    const icon = document.createElement('div');
+    icon.className = 'file-icon';
+    icon.textContent = 'XML';
+    const info = document.createElement('div');
+    info.className = 'file-info';
+    const name = document.createElement('div');
+    name.className = 'file-name';
+    name.textContent = f.name;
+    const meta = document.createElement('div');
+    meta.className = 'file-meta';
+    meta.textContent = (f.size/1024).toFixed(1) + ' KB • ' + new Date(f.ts*1000).toLocaleDateString();
+    info.append(name, meta);
+    item.append(icon, info);
+    item.addEventListener('click', () => loadFile(f.path));
+    list.append(item);
+  }
 }
 
 function renderEmpty(){
@@ -557,16 +563,13 @@ function renderEmpty(){
 }
 
 async function loadFile(path){
-  const names=["","keybox.xml","keybox2.xml","keybox3.xml"];
   try{
-    await runShell(`
-      mkdir -p ${DEST} &&
-      cp -f "${path}" ${DEST}/${names[slot]} &&
-      chmod 644 ${DEST}/${names[slot]}
-    `);
+    const quote = value => "'" + String(value).replace(/'/g, "'\\''") + "'";
+    const result = await runShell('sh /data/adb/modules/playintegrityfix/webroot/common_scripts/autopilot.sh import ' + quote(path) + ' ' + slot + '; printf "\\nIMPORT_EXIT=%s\\n" "$?"');
+    if (!/(?:^|\n)IMPORT_EXIT=0\s*$/.test(String(result))) throw new Error(String(result).replace(/IMPORT_EXIT=\d+/g, '').trim().slice(0, 160) || 'Validation or install failed');
     showToast(`Loaded to Slot ${slot}`,"success");
-  }catch{
-    showToast("Failed to load","error");
+  }catch(error){
+    showToast(error.message || "Failed to load","error");
   }
 }
 
