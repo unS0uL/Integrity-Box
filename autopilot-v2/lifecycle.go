@@ -51,7 +51,7 @@ func processStart(pid int) string {
 	return parts[19]
 }
 func signalSupervisor(ram string) {
-	b, err := os.ReadFile(filepath.Join(ram, "supervisor.json"))
+	b, err := readLimited(filepath.Join(ram, "supervisor.json"), 4096)
 	if err != nil {
 		return
 	}

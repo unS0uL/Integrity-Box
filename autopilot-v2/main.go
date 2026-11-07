@@ -90,6 +90,7 @@ type Document struct {
 	Boxes   []Box    `xml:"Keybox"`
 }
 type Health struct {
+	Identity    string    `json:"keybox_identity"`
 	Roots       []string  `json:"root_public_key_hashes"`
 	State       string    `json:"state"`
 	Fingerprint string    `json:"fingerprint"`
@@ -131,13 +132,17 @@ func inspect(data []byte, now time.Time) (Health, error) {
 	if len(data) == 0 || len(data) > maxXML {
 		return h, errors.New("XML size")
 	}
+	data = bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})
 	if bytes.Contains(bytes.ToUpper(data), []byte("<!DOCTYPE")) || bytes.Contains(bytes.ToUpper(data), []byte("<!ENTITY")) {
 		return h, errors.New("XML directives forbidden")
+	}
+	if err := validateXMLShape(data); err != nil {
+		return h, err
 	}
 	var d Document
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	if e := dec.Decode(&d); e != nil {
-		return h, e
+		return h, errors.New("invalid keybox XML values")
 	}
 	for {
 		t, e := dec.Token()
@@ -145,7 +150,7 @@ func inspect(data []byte, now time.Time) (Health, error) {
 			break
 		}
 		if e != nil {
-			return h, e
+			return h, errors.New("invalid keybox XML syntax")
 		}
 		if _, ok := t.(xml.Comment); ok {
 			continue
@@ -161,7 +166,13 @@ func inspect(data []byte, now time.Time) (Health, error) {
 		return h, errors.New("key count")
 	}
 	h.State = "valid"
+	identities := []string{}
+	algorithms := map[string]bool{}
 	for _, k := range d.Boxes[0].Keys {
+		if algorithms[k.Algorithm] {
+			return h, errors.New("duplicate key algorithm")
+		}
+		algorithms[k.Algorithm] = true
 		s, e := signer(k.Private)
 		if e != nil {
 			return h, e
@@ -182,6 +193,7 @@ func inspect(data []byte, now time.Time) (Health, error) {
 			return h, errors.New("chain count")
 		}
 		var previous *x509.Certificate
+		chain := []*x509.Certificate{}
 		for i, text := range k.Certificates {
 			p, rest := pem.Decode(cleanPEM(text))
 			if p == nil || p.Type != "CERTIFICATE" || len(bytes.TrimSpace(rest)) != 0 {
@@ -191,7 +203,13 @@ func inspect(data []byte, now time.Time) (Health, error) {
 			if e != nil {
 				return h, e
 			}
+			chain = append(chain, c)
 			if i == 0 {
+				if !c.BasicConstraintsValid || !c.IsCA || c.KeyUsage&x509.KeyUsageCertSign == 0 {
+					return h, errors.New("keybox certificate cannot sign attestations")
+				}
+				id := sha256.Sum256(c.Raw)
+				identities = append(identities, hex.EncodeToString(id[:]))
 				a, _ := x509.MarshalPKIXPublicKey(s.Public())
 				b, _ := x509.MarshalPKIXPublicKey(c.PublicKey)
 				if !bytes.Equal(a, b) {
@@ -216,6 +234,17 @@ func inspect(data []byte, now time.Time) (Health, error) {
 				h.State = "expired"
 			}
 		}
+		if h.State == "valid" && now.Year() >= 2025 {
+			roots := x509.NewCertPool()
+			roots.AddCert(previous)
+			intermediates := x509.NewCertPool()
+			for _, c := range chain[1 : len(chain)-1] {
+				intermediates.AddCert(c)
+			}
+			if _, er := chain[0].Verify(x509.VerifyOptions{Roots: roots, Intermediates: intermediates, CurrentTime: now, KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny}}); er != nil {
+				return h, errors.New("unsupported certificate chain constraints")
+			}
+		}
 		rootHash := sha256.Sum256(previous.RawSubjectPublicKeyInfo)
 		h.Roots = append(h.Roots, hex.EncodeToString(rootHash[:]))
 		// Require a self-signed terminal certificate. Trust provenance remains separate.
@@ -223,6 +252,9 @@ func inspect(data []byte, now time.Time) (Health, error) {
 			return h, errors.New("terminal signature")
 		}
 	}
+	sort.Strings(identities)
+	identity := sha256.Sum256([]byte(strings.Join(identities, "|")))
+	h.Identity = hex.EncodeToString(identity[:])
 	if now.Year() < 2025 {
 		h.State = "time_unknown"
 	}
@@ -359,7 +391,7 @@ func (e *Engine) publish() {
 		e.statusErrorAt = time.Time{}
 	}
 }
-func readKey(path string) ([]byte, error) {
+func readLimited(path string, limit int64) ([]byte, error) {
 	if er := safeRegular(path, false); er != nil {
 		return nil, er
 	}
@@ -368,12 +400,20 @@ func readKey(path string) ([]byte, error) {
 		return nil, er
 	}
 	defer f.Close()
-	b, er := io.ReadAll(io.LimitReader(f, maxXML+1))
-	if len(b) > maxXML {
-		return nil, errors.New("keybox byte limit")
+	st, er := f.Stat()
+	if er != nil {
+		return nil, er
+	}
+	if st.Size() > limit {
+		return nil, errors.New("file byte limit")
+	}
+	b, er := io.ReadAll(io.LimitReader(f, limit+1))
+	if int64(len(b)) > limit {
+		return nil, errors.New("file byte limit")
 	}
 	return b, er
 }
+func readKey(path string) ([]byte, error) { return readLimited(path, maxXML) }
 func (e *Engine) health() Health {
 	b, err := readKey(e.target())
 	if err != nil {
@@ -385,7 +425,7 @@ func (e *Engine) health() Health {
 	} else if !trusted(h) {
 		h.State = "untrusted"
 	}
-	if e.isKnownAnchor(h.Fingerprint) {
+	if e.isKnownAnchor(h.Identity) || e.isKnownAnchor(h.Fingerprint) {
 		h.Anchor = true
 	}
 	return h
@@ -462,6 +502,9 @@ func (e *Engine) get(ctx context.Context, address string, limit int64) ([]byte, 
 			return nil, er
 		}
 		req.Header = headers
+		if e.client == nil {
+			return nil, errors.New("HTTP backend unavailable")
+		}
 		response, err = e.client.Do(req)
 	}
 	if err != nil {
@@ -579,9 +622,12 @@ func (e *Engine) crl(ctx context.Context) {
 	}
 	m := map[string]bool{}
 	for s, v := range d.Entries {
-		if v.Status != "" {
-			m[strings.TrimLeft(strings.ToLower(s), "0")] = true
+		if s == "" || s[0] == '0' || strings.Trim(s, "0123456789abcdef") != "" || (v.Status != "REVOKED" && v.Status != "SUSPENDED") {
+			e.status.Revocation = "invalid_response"
+			logEvent("crl_invalid_schema", "android.googleapis.com", 200)
+			return
 		}
+		m[s] = true
 	}
 	e.revoked = m
 	e.crlAt = time.Now()
@@ -650,11 +696,17 @@ func (e *Engine) candidate(ctx context.Context, u string, secondary bool) ([]byt
 	if err != nil {
 		return nil, h, err
 	}
-	if strings.HasSuffix(u, "/Megatron2") || e.isKnownAnchor(h.Fingerprint) {
+	if strings.HasSuffix(u, "/Megatron2") || e.isKnownAnchor(h.Identity) || e.isKnownAnchor(h.Fingerprint) {
 		h.Anchor = true
 	}
-	if h.State != "valid" || e.isRevoked(h) || !trusted(h) {
-		return nil, h, errors.New("candidate invalid or revoked")
+	address, _ := url.Parse(u)
+	if e.isRevoked(h) {
+		logEvent("candidate_revoked", address.Hostname(), 0)
+		return nil, h, errors.New("candidate revoked")
+	}
+	if h.State != "valid" || !trusted(h) {
+		logEvent("candidate_invalid", address.Hostname(), 0)
+		return nil, h, errors.New("candidate invalid or untrusted")
 	}
 	return b, h, nil
 }
@@ -747,7 +799,7 @@ func (e *Engine) secondary(ctx context.Context) ([]byte, Health, error) {
 }
 func (e *Engine) eligible(c Health) bool {
 	h := e.status.Local
-	if c.Fingerprint == h.Fingerprint {
+	if c.Fingerprint == h.Fingerprint || (h.Identity != "" && c.Identity == h.Identity && !c.Expires.After(h.Expires)) {
 		return false
 	}
 	if h.State == "valid" && !e.isRevoked(h) && ((h.Anchor && (c.Anchor || e.status.Revocation != "fresh")) || (!h.Anchor && (c.Anchor || !c.Expires.After(h.Expires) || e.status.Revocation != "fresh"))) {
@@ -764,7 +816,7 @@ func generation(brain string) string {
 		p := filepath.Join("/data/adb/modules", mod)
 		fmt.Fprintf(&b, "%s:%t:%t:%t;", mod, exists(p), exists(filepath.Join(p, "disable")), exists(filepath.Join(p, "remove")))
 	}
-	rev, err := os.ReadFile(filepath.Join(brain, ".autopilot-config-revision"))
+	rev, err := readLimited(filepath.Join(brain, ".autopilot-config-revision"), 64)
 	if err != nil && !os.IsNotExist(err) {
 		b.WriteString("revision_unreadable")
 	}
@@ -790,6 +842,9 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 	}
 	e.status.Phase = "auditing"
 	e.publish()
+	if _, revisionErr := configRevision(e.brain); revisionErr != nil {
+		return errors.New("invalid configuration revision")
+	}
 	previousLocal := e.status.Local
 	e.status.Local = e.health()
 	if _, er := e.knownAnchors(); er != nil {
@@ -1019,6 +1074,12 @@ func (e *Engine) daemon(ctx context.Context) error {
 		e.publish()
 		return recoveryErr
 	}
+	if _, revisionErr := configRevision(e.brain); revisionErr != nil {
+		e.status.Phase = "configuration_required"
+		e.status.Reason = "invalid configuration revision"
+		e.publish()
+		return errors.New("invalid configuration revision")
+	}
 	deadline := time.Now().Add(60 * time.Second)
 	bootCtx, bootCancel := context.WithTimeout(ctx, 60*time.Second)
 	defer bootCancel()
@@ -1163,7 +1224,7 @@ func main() {
 		e.moduleRoot = filepath.Clean(filepath.Join(filepath.Dir(exe), "../../.."))
 	}
 	if os.Args[1] == "status" {
-		b, err := os.ReadFile(filepath.Join(e.ram, "status.json"))
+		b, err := readLimited(filepath.Join(e.ram, "status.json"), 64<<10)
 		if err != nil {
 			_ = json.NewEncoder(os.Stdout).Encode(Status{Enabled: e.enabled(), Local: e.health(), Integrity: "not_measured", Phase: "not_started", TimeState: "unknown", Revocation: "unknown"})
 			return
@@ -1197,23 +1258,27 @@ func main() {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
-	roots, _ := x509.SystemCertPool()
-	if roots == nil {
-		roots = x509.NewCertPool()
-	}
-	files, _ := filepath.Glob("/system/etc/security/cacerts/*")
-	for _, p := range files {
-		b, er := os.ReadFile(p)
-		if er == nil {
-			roots.AppendCertsFromPEM(b)
+	// Android uses native curl and its trust store; avoid loading a second CA pool.
+	if !exists("/system/bin/curl") {
+		roots, _ := x509.SystemCertPool()
+		if roots == nil {
+			roots = x509.NewCertPool()
 		}
-	}
-	e.client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext, TLSHandshakeTimeout: 4 * time.Second, Proxy: http.ProxyFromEnvironment, DisableCompression: true, MaxIdleConns: 2, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(r *http.Request, via []*http.Request) error {
-		if len(via) >= 5 || r.URL.Scheme != "https" || !allowedHost(r.URL.Hostname()) {
-			return errors.New("redirect policy")
+		files, _ := filepath.Glob("/system/etc/security/cacerts/*")
+		for _, p := range files {
+			b, er := os.ReadFile(p)
+			if er == nil {
+				roots.AppendCertsFromPEM(b)
+			}
 		}
-		return nil
-	}}
+		e.client = &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: roots, MinVersion: tls.VersionTLS12}, DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext, TLSHandshakeTimeout: 4 * time.Second, Proxy: http.ProxyFromEnvironment, DisableCompression: true, MaxIdleConns: 2, IdleConnTimeout: 30 * time.Second}, CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if len(via) >= 5 || r.URL.Scheme != "https" || !allowedHost(r.URL.Hostname()) {
+				return errors.New("redirect policy")
+			}
+			return nil
+		}}
+
+	}
 	e.status = Status{Integrity: "not_measured", Revocation: "unknown", Phase: "starting", TimeState: "unknown"}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
 	defer cancel()

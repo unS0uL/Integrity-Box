@@ -62,3 +62,13 @@ Exit codes and sanitized HTTP/telemetry failures go to logcat. No timing behavio
 is claimed from process presence alone. `observe.py` optionally records bounded,
 read-only hourly status/hash samples on the host; transport gaps are missing
 evidence, and this sampling is not an A/B battery benchmark.
+
+Final validation hardening rejects ambiguous XML scalar fields/namespaces and
+non-CA signing certificates, and performs full X.509 path validation. The stable
+identity of an emergency keybox is derived from leaf certificate DER, so XML
+formatting cannot bypass anchor recognition; raw file hashes still protect CAS.
+Revocation entries must have canonical certificate serials and known statuses;
+a malformed response cannot erase previously known revocations. Runtime metadata
+has explicit byte limits. A corrupt config revision blocks installation but does
+not prevent stopping the service. Pilot displays verified process liveness rather
+than interpreting an old heartbeat during suspend as a dead process.

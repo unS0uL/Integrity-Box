@@ -431,7 +431,7 @@ input:checked + .ios-toggle-slider:before{
           <span class="material-icons">monitor_heart</span>
         </div>
         <div class="ios-item-content">
-          <div class="ios-item-title">Daemon Heartbeat</div>
+          <div class="ios-item-title">Daemon Process / Last Heartbeat</div>
           <div class="ios-item-subtitle" id="heartbeatSubtitle">Checking...</div>
           <div class="ios-item-time" id="heartbeatTime">--</div>
         </div>
@@ -661,12 +661,12 @@ function updateModeUI(mode) {
   }
 }
 
-function updateHeartbeatUI(timestamp) {
+function updateHeartbeatUI(timestamp, running) {
   const subtitle = document.getElementById('heartbeatSubtitle');
   const timeEl = document.getElementById('heartbeatTime');
   const icon = document.getElementById('heartbeatIcon');
   
-  const status = getHeartbeatStatus(timestamp);
+  const status = running === true ? {status: 'active', text: 'Process alive'} : running === false ? {status: 'dead', text: 'Not running'} : getHeartbeatStatus(timestamp);
   
   subtitle.textContent = status.text;
   timeEl.textContent = timeAgo(timestamp) + ' • ' + formatExactTime(timestamp);
@@ -701,7 +701,7 @@ function checkAutopilot() {
       const state = JSON.parse(result);
       document.getElementById('autopilotToggle').checked = state.desired_enabled;
       document.getElementById('statusSubtitle').textContent = state.running ? state.phase : (state.desired_enabled ? 'Waiting for service' : 'Disabled');
-      updateHeartbeatUI(state.running ? Math.floor(Date.parse(state.heartbeat)/1000) : 0);
+      updateHeartbeatUI(state.running ? Math.floor(Date.parse(state.heartbeat)/1000) : 0, state.running);
       document.getElementById('githubSubtitle').textContent = state.reason || ('Revocation: ' + state.revocation_state);
       document.getElementById('githubTime').textContent = state.next_due && !state.next_due.startsWith('0001') ? state.next_due : '--';
     } catch { document.getElementById('statusSubtitle').textContent = 'Status unavailable'; }

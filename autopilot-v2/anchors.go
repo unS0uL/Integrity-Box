@@ -9,7 +9,7 @@ import (
 )
 
 func (e *Engine) knownAnchors() ([]string, error) {
-	b, err := os.ReadFile(filepath.Join(e.brain, ".autopilot-known-anchors.json"))
+	b, err := readLimited(filepath.Join(e.brain, ".autopilot-known-anchors.json"), 8192)
 	if os.IsNotExist(err) {
 		return nil, nil
 	}

@@ -44,7 +44,7 @@ func fixture(t *testing.T, expired bool) []byte {
 	if expired {
 		end = now.Add(-time.Minute)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "test"}, NotBefore: now.Add(-time.Hour), NotAfter: end, KeyUsage: x509.KeyUsageDigitalSignature}
+	leaf := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "test"}, NotBefore: now.Add(-time.Hour), NotAfter: end, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true, BasicConstraintsValid: true}
 	ld, err := x509.CreateCertificate(rand.Reader, leaf, rc, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
@@ -784,5 +784,174 @@ func TestManualReplacementChangesAuditSignature(t *testing.T) {
 	os.Rename(tmp, e.target())
 	if e.targetSignature() == before {
 		t.Fatal("manual import not noticed")
+	}
+}
+
+func TestRevokedCandidateHasDistinctDiagnostic(t *testing.T) {
+	data := fixture(t, false)
+	trustFixture(t, data)
+	event := ""
+	oldSink := diagnosticSink
+	diagnosticSink = func(name, host string, code int) { event = name }
+	defer func() { diagnosticSink = oldSink }()
+	e := Engine{revoked: map[string]bool{"7": true}, request: func(*http.Request) (*http.Response, error) { return reply(200, secondaryEncode(data)), nil }}
+	if _, _, err := e.candidate(context.Background(), "https://rawbin.dpejoh.com/key/TAKR/1", true); err == nil || event != "candidate_revoked" {
+		t.Fatal("revocation reason lost", err, event)
+	}
+}
+
+func TestAnchorIdentitySurvivesXMLReformatting(t *testing.T) {
+	dir := t.TempDir()
+	data := fixture(t, false)
+	trustFixture(t, data)
+	h, err := inspect(data, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := Engine{root: dir, ram: dir, brain: dir}
+	if err = e.rememberAnchor(h.Identity); err != nil {
+		t.Fatal(err)
+	}
+	reformatted := bytes.Replace(data, []byte("<Keybox>"), []byte("\n<Keybox>\n"), 1)
+	os.WriteFile(e.target(), reformatted, 0600)
+	got := e.health()
+	if got.Identity != h.Identity || got.Fingerprint == h.Fingerprint || !got.Anchor {
+		t.Fatal("formatting lost anchor identity")
+	}
+	h.Anchor = true
+	e.status = Status{Local: h, Revocation: "fresh"}
+	if e.eligible(got) {
+		t.Fatal("formatting treated as anchor upgrade")
+	}
+}
+func TestDuplicateAlgorithmsRejected(t *testing.T) {
+	data := fixture(t, false)
+	s := string(data)
+	a := strings.Index(s, "<Key algorithm=")
+	b := strings.Index(s, "</Key>") + len("</Key>")
+	duplicated := strings.Replace(s, "</Keybox>", s[a:b]+"</Keybox>", 1)
+	if _, err := inspect([]byte(duplicated), time.Now()); err == nil {
+		t.Fatal("ambiguous duplicate keys accepted")
+	}
+}
+
+func TestRejectAmbiguousXMLConsumerInterpretation(t *testing.T) {
+	base := string(fixture(t, false))
+	cases := []string{strings.Replace(base, "<NumberOfKeyboxes>1</NumberOfKeyboxes>", "<NumberOfKeyboxes>0</NumberOfKeyboxes><NumberOfKeyboxes>1</NumberOfKeyboxes>", 1), strings.Replace(base, `<Key algorithm="ecdsa">`, `<Key algorithm="rsa" algorithm="ecdsa">`, 1), strings.Replace(strings.Replace(base, "<AndroidAttestation>", `<x:AndroidAttestation xmlns:x="urn:unexpected">`, 1), "</AndroidAttestation>", "</x:AndroidAttestation>", 1), "garbage" + base, strings.Replace(base, "<NumberOfKeyboxes>1</NumberOfKeyboxes>", "<NumberOfKeyboxes>0<!--split-->1</NumberOfKeyboxes>", 1), strings.Replace(base, "-----BEGIN EC PRIVATE KEY-----", "-----BEGIN EC PRIVATE<!--split--> KEY-----", 1), strings.Replace(base, "<NumberOfKeyboxes>1</NumberOfKeyboxes>", "<NumberOfKeyboxes>\u00a01</NumberOfKeyboxes>", 1)}
+	for i, data := range cases {
+		if _, err := inspect([]byte(data), time.Now()); err == nil {
+			t.Fatal("ambiguous XML accepted", i)
+		}
+	}
+}
+
+func TestUTF8BOMPreservesCryptographicIdentity(t *testing.T) {
+	data := fixture(t, false)
+	plain, err := inspect(data, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	withBOM := append([]byte{0xef, 0xbb, 0xbf}, data...)
+	bom, err := inspect(withBOM, time.Now())
+	if err != nil || plain.Identity != bom.Identity || plain.Fingerprint == bom.Fingerprint {
+		t.Fatal("BOM handling inconsistent", err)
+	}
+}
+
+func TestEndEntityCertificateCannotBecomeKeyboxSigner(t *testing.T) {
+	data := fixture(t, false)
+	var d Document
+	if err := xml.Unmarshal(data, &d); err != nil {
+		t.Fatal(err)
+	}
+	key := &d.Boxes[0].Keys[0]
+	s, err := signer(key.Private)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootPEM, _ := pem.Decode(cleanPEM(key.Certificates[len(key.Certificates)-1]))
+	root, _ := x509.ParseCertificate(rootPEM.Bytes)
+	leafPEM, _ := pem.Decode(cleanPEM(key.Certificates[0]))
+	leaf, _ := x509.ParseCertificate(leafPEM.Bytes)
+	leaf.IsCA = false
+	leaf.KeyUsage = x509.KeyUsageDigitalSignature
+	der, err := x509.CreateCertificate(rand.Reader, leaf, root, s.Public(), s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key.Certificates[0] = string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der}))
+	bad, err := xml.Marshal(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = inspect(bad, time.Now()); err == nil {
+		t.Fatal("non-CA certificate accepted as attestation signer")
+	}
+}
+
+func TestMalformedCRLDoesNotEraseKnownRevocations(t *testing.T) {
+	for _, body := range []string{`{"entries":{"7":{}}}`, `{"entries":{"7":{"status":"UNKNOWN"}}}`, `{"entries":{"07":{"status":"REVOKED"}}}`, `{"entries":{"XX":{"status":"REVOKED"}}}`} {
+		e := Engine{revoked: map[string]bool{"7": true}, request: func(*http.Request) (*http.Response, error) { return reply(200, []byte(body)), nil }}
+		e.crl(context.Background())
+		if e.status.Revocation != "invalid_response" || !e.revoked["7"] || !e.crlAt.IsZero() {
+			t.Fatal("invalid CRL treated as healthy", body)
+		}
+	}
+}
+
+func TestOversizedJournalRejectedBeforeRecovery(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	os.WriteFile(e.target(), []byte("current"), 0600)
+	td := filepath.Join(dir, ".autopilot-transaction")
+	os.Mkdir(td, 0700)
+	journal := filepath.Join(td, "journal.json")
+	f, err := os.OpenFile(journal, os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.Truncate(128 << 20)
+	f.Close()
+	if e.recoverTransaction() == nil {
+		t.Fatal("oversized metadata accepted")
+	}
+	got, _ := os.ReadFile(e.target())
+	if string(got) != "current" || !exists(journal) {
+		t.Fatal("oversized journal changed state")
+	}
+}
+
+func TestCorruptRevisionCannotPreventShutdown(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	os.WriteFile(filepath.Join(dir, "autopilot"), nil, 0600)
+	os.WriteFile(filepath.Join(dir, ".autopilot-config-revision"), []byte("corrupted"), 0600)
+	if err := e.disable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if e.enabled() {
+		t.Fatal("corrupt config kept updater enabled")
+	}
+	if e.setFlag(context.Background(), "autopilot", true) == nil {
+		t.Fatal("corrupt generation silently reused")
+	}
+}
+
+func TestCorruptRevisionBlocksInstallsButNotStop(t *testing.T) {
+	dir := t.TempDir()
+	e := Engine{root: dir, ram: dir, brain: dir}
+	old := fixture(t, false)
+	os.WriteFile(e.target(), old, 0600)
+	os.WriteFile(filepath.Join(dir, ".autopilot-config-revision"), nil, 0600)
+	sum := sha256.Sum256(old)
+	if e.install(fixture(t, false), hex.EncodeToString(sum[:]), generation(dir), false) == nil {
+		t.Fatal("corrupt config allowed install")
+	}
+	if err := e.disable(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := os.ReadFile(e.target())
+	if !bytes.Equal(got, old) {
+		t.Fatal("working file changed")
 	}
 }

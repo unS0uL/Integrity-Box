@@ -43,27 +43,45 @@ func (e *Engine) setFlag(ctx context.Context, name string, on bool) error {
 	if err = os.MkdirAll(e.brain, 0700); err != nil {
 		return err
 	}
-	path := filepath.Join(e.brain, ".autopilot-config-revision")
-	b, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	var n uint64
-	if len(b) > 0 {
-		n, err = strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
-		if err != nil {
-			return err
+	fail := func(cause error) error {
+		if name == "autopilot" && !on {
+			logEvent("shutdown_without_config_revision", "local", 0)
+			removeErr := os.Remove(filepath.Join(e.brain, name))
+			if os.IsNotExist(removeErr) {
+				return nil
+			}
+			return removeErr
 		}
+		return cause
+	}
+	path := filepath.Join(e.brain, ".autopilot-config-revision")
+	n, err := configRevision(e.brain)
+	if err != nil {
+		return fail(err)
 	}
 	if n == ^uint64(0) {
-		return errors.New("configuration revision exhausted")
+		return fail(errors.New("configuration revision exhausted"))
 	}
 	// Revision first: a failed flag write may invalidate work, never authorize stale work.
 	if err = atomic(path, []byte(fmt.Sprint(n+1)), 0600); err != nil {
-		return err
+		return fail(err)
 	}
 	if on {
 		return atomic(filepath.Join(e.brain, name), nil, 0600)
 	}
 	return os.Remove(filepath.Join(e.brain, name))
+}
+
+func configRevision(brain string) (uint64, error) {
+	b, err := readLimited(filepath.Join(brain, ".autopilot-config-revision"), 64)
+	if os.IsNotExist(err) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	if len(b) == 0 {
+		return 0, errors.New("empty configuration revision")
+	}
+	return strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64)
 }

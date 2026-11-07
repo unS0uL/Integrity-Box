@@ -109,7 +109,7 @@ func stageTarget(p string, b []byte, mode os.FileMode, uid, gid int, context str
 func (e *Engine) recoverTransaction() error {
 	dir := filepath.Join(e.root, ".autopilot-transaction")
 	journal := filepath.Join(dir, "journal.json")
-	b, err := os.ReadFile(journal)
+	b, err := readLimited(journal, 64<<10)
 	if os.IsNotExist(err) {
 		for _, base := range []string{e.root, "/data/adb/teesim", "/data/misc/keystore/omk"} {
 			files, _ := filepath.Glob(filepath.Join(base, ".autopilot-stage-*"))
@@ -151,7 +151,7 @@ func (e *Engine) recoverTransaction() error {
 	}
 	for _, v := range tx.Entries {
 		if v.Existed {
-			data, er := os.ReadFile(v.Backup)
+			data, er := readKey(v.Backup)
 			if er != nil {
 				return er
 			}
@@ -197,6 +197,9 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 		return configErr
 	}
 	defer configLock.Close()
+	if _, revisionErr := configRevision(e.brain); revisionErr != nil {
+		return errors.New("invalid configuration revision")
+	}
 	if generation(e.brain) != gen || automatic && !e.enabled() {
 		return errors.New("configuration changed")
 	}
@@ -215,8 +218,11 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 		return errUnchanged
 	}
 	if e.status.Source == "Megatron2" {
-		hash := sha256.Sum256(data)
-		if err = e.rememberAnchor(hex.EncodeToString(hash[:])); err != nil {
+		health, inspectErr := inspect(data, time.Now())
+		if inspectErr != nil {
+			return inspectErr
+		}
+		if err = e.rememberAnchor(health.Identity); err != nil {
 			return err
 		}
 	}
@@ -339,7 +345,7 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 type installedRecord struct{ Fingerprint, Source string }
 
 func (e *Engine) installedSource(fingerprint string) string {
-	b, er := os.ReadFile(filepath.Join(e.ram, "installed-source.json"))
+	b, er := readLimited(filepath.Join(e.ram, "installed-source.json"), 8192)
 	if er != nil {
 		return "unknown"
 	}
