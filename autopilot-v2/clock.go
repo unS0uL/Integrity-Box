@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math"
+	"net/http"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -36,10 +37,47 @@ func verifyNetworkTime(output string, now time.Time, boot float64) error {
 	}
 	return nil
 }
+
+// verifyHTTPDate accepts the Date header of a TLS-authenticated response when it agrees
+// with the system clock. It is the fallback for devices without Android's network-time
+// service; a badly wrong clock also breaks TLS validation, so the fallback fails closed.
+func verifyHTTPDate(header string, now time.Time, rtt time.Duration) error {
+	t, err := http.ParseTime(header)
+	if err != nil {
+		return errors.New("HTTP date unavailable")
+	}
+	if rtt < 0 || rtt > 15*time.Second {
+		return errors.New("HTTP date sample too slow")
+	}
+	if d := now.Sub(t); d < -5*time.Minute-rtt || d > 5*time.Minute+rtt {
+		return errors.New("system clock disagrees with HTTP date")
+	}
+	return nil
+}
 func (e *Engine) probeTime(ctx context.Context) error {
 	if e.timeCheck != nil {
 		return e.timeCheck(ctx)
 	}
+	e.status.TimeSource = "" // never leave the source of an earlier success next to a failure
+	check := e.probeNetworkClock
+	if e.networkClock != nil {
+		check = e.networkClock
+	}
+	err := check(ctx)
+	if err == nil {
+		e.status.TimeSource = "android_network_time"
+		return nil
+	}
+	if _, getErr := e.get(ctx, "https://android.googleapis.com/attestation/status", 4<<20); getErr != nil {
+		return err
+	}
+	if dateErr := verifyHTTPDate(e.lastDate, time.Now(), e.lastDateRTT); dateErr != nil {
+		return dateErr
+	}
+	e.status.TimeSource = "https_date"
+	return nil
+}
+func (e *Engine) probeNetworkClock(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "/system/bin/cmd", "time_detector", "get_network_time")

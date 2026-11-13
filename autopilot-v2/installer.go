@@ -16,6 +16,9 @@ import (
 	"time"
 )
 
+// errUnchanged reports that the candidate is byte-identical to the installed file.
+var errUnchanged = errors.New("unchanged")
+
 type transactionEntry struct {
 	Target, Stage, Backup, Context string
 	Mode                           uint32
@@ -109,6 +112,10 @@ func stageTarget(p string, b []byte, mode os.FileMode, uid, gid int, context str
 func (e *Engine) recoverTransaction() error {
 	dir := filepath.Join(e.root, ".autopilot-transaction")
 	journal := filepath.Join(dir, "journal.json")
+	// Earlier versions left a copy of the replaced key next to the target. Backups exist only
+	// inside a transaction, so remove it on every pass, whatever the journal state (it holds a
+	// private key).
+	_ = os.Remove(filepath.Join(e.root, "keybox.autopilot-backup.xml"))
 	b, err := readLimited(journal, 64<<10)
 	if os.IsNotExist(err) {
 		for _, base := range []string{e.root, "/data/adb/teesim", "/data/misc/keystore/omk"} {
@@ -320,12 +327,6 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 		if er != nil || !bytes.Equal(got, data) {
 			re := e.recoverTransaction()
 			return fmt.Errorf("post-commit mismatch; rollback: %v", re)
-		}
-	}
-	if len(old) > 0 {
-		if err = atomic(filepath.Join(e.root, "keybox.autopilot-backup.xml"), old, 0600); err != nil {
-			re := e.recoverTransaction()
-			return fmt.Errorf("backup failed: %v; rollback: %v", err, re)
 		}
 	}
 	if err = os.Remove(filepath.Join(dir, "journal.json")); err != nil {

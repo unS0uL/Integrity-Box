@@ -27,7 +27,14 @@ import (
 	"time"
 )
 
-func fixture(t *testing.T, expired bool) []byte {
+type fixtureOpts struct {
+	Expired     bool
+	LeafSerial  *big.Int
+	PrivateType string        // "EC PRIVATE KEY" (default) or "PRIVATE KEY" (PKCS#8)
+	ValidFor    time.Duration // leaf lifetime from now, default 48h
+}
+
+func fixtureWith(t *testing.T, o fixtureOpts) []byte {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
@@ -41,16 +48,39 @@ func fixture(t *testing.T, expired bool) []byte {
 	}
 	rc, _ := x509.ParseCertificate(rd)
 	end := now.Add(48 * time.Hour)
-	if expired {
+	if o.ValidFor > 0 {
+		end = now.Add(o.ValidFor)
+	}
+	if o.Expired {
 		end = now.Add(-time.Minute)
 	}
-	leaf := &x509.Certificate{SerialNumber: big.NewInt(7), Subject: pkix.Name{CommonName: "test"}, NotBefore: now.Add(-time.Hour), NotAfter: end, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true, BasicConstraintsValid: true}
+	serialNumber := o.LeafSerial
+	if serialNumber == nil {
+		serialNumber = big.NewInt(7)
+	}
+	leaf := &x509.Certificate{SerialNumber: serialNumber, Subject: pkix.Name{CommonName: "test"}, NotBefore: now.Add(-time.Hour), NotAfter: end, KeyUsage: x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign, IsCA: true, BasicConstraintsValid: true}
 	ld, err := x509.CreateCertificate(rand.Reader, leaf, rc, &key.PublicKey, key)
 	if err != nil {
 		t.Fatal(err)
 	}
-	kd, _ := x509.MarshalECPrivateKey(key)
-	return []byte(fmt.Sprintf("<AndroidAttestation><NumberOfKeyboxes>1</NumberOfKeyboxes><Keybox><Key algorithm=\"ecdsa\"><PrivateKey>%s</PrivateKey><CertificateChain><NumberOfCertificates>2</NumberOfCertificates><Certificate>%s</Certificate><Certificate>%s</Certificate></CertificateChain></Key></Keybox></AndroidAttestation>", pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kd}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ld}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rd})))
+	privateType := o.PrivateType
+	if privateType == "" {
+		privateType = "EC PRIVATE KEY"
+	}
+	var kd []byte
+	if privateType == "PRIVATE KEY" {
+		kd, err = x509.MarshalPKCS8PrivateKey(key)
+	} else {
+		kd, err = x509.MarshalECPrivateKey(key)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	return []byte(fmt.Sprintf("<AndroidAttestation><NumberOfKeyboxes>1</NumberOfKeyboxes><Keybox><Key algorithm=\"ecdsa\"><PrivateKey>%s</PrivateKey><CertificateChain><NumberOfCertificates>2</NumberOfCertificates><Certificate>%s</Certificate><Certificate>%s</Certificate></CertificateChain></Key></Keybox></AndroidAttestation>", pem.EncodeToMemory(&pem.Block{Type: privateType, Bytes: kd}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: ld}), pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rd})))
+}
+func fixture(t *testing.T, expired bool) []byte {
+	t.Helper()
+	return fixtureWith(t, fixtureOpts{Expired: expired})
 }
 func TestInspect(t *testing.T) {
 	for _, expired := range []bool{false, true} {
@@ -198,9 +228,8 @@ func TestAndroidTransaction(t *testing.T) {
 	if err != nil || !bytes.Equal(got, after) {
 		t.Fatal("commit mismatch", err)
 	}
-	backup, err := os.ReadFile(filepath.Join(dir, "keybox.autopilot-backup.xml"))
-	if err != nil || !bytes.Equal(backup, before) {
-		t.Fatal("backup mismatch", err)
+	if exists(filepath.Join(dir, "keybox.autopilot-backup.xml")) || exists(filepath.Join(dir, ".autopilot-transaction")) {
+		t.Fatal("a completed install must leave no backup or transaction directory")
 	}
 	// Simulate crash after first rename with journal still present.
 	td := filepath.Join(dir, ".autopilot-transaction")
