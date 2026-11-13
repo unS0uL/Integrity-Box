@@ -1,5 +1,7 @@
 # AutoPilot v2
 
+> Complete, current description of the business logic, build and deployment: `docs/integrity-box/AUTOPILOT_GUIDE.md` (workspace root). This README keeps the engine reference.
+
 ARM64 Android engine with POSIX entry points. Build with `./build.sh` from this directory (Go 1.24+, validated with Go 1.27.2). No third-party Go dependencies. Binary uses Android's native curl for netd/bionic DNS; HTTPS verification remains enabled. Google attestation trust anchors are embedded from https://android.googleapis.com/attestation/root (retrieved 2026-11-07); public-key pinning permits equivalent reissued roots. Root changes require a reviewed rebuild.
 
 `webroot/common_scripts/autopilot.sh` commands:
@@ -22,7 +24,7 @@ Retries: 30 minutes, two hours, six hours, then up to twelve hours indefinitely,
 
 The scheduler uses /proc/uptime for suspend-aware deadlines. No alarm wakes a suspended phone: work is postponed until an ordinary eligible wake. On battery, screen off or low battery defers work; external supply is detected through usb/pc_port/dc online, including Not charging at a charge limit. A 25-second grace is measured after the screen is observed on; polling may delay work further. Two lightweight service loops poll at most once a minute in steady state. Supervisor doesn't use stale heartbeat to kill a suspended child.
 
-Installation: parse XML/DER, validate private/public pairing, chain signatures, supplied trusted root and dates. File write transaction is staged on each target filesystem, preserves existing ownership/mode/context, journals bounded original copies, renames and syncs directories, verifies bytes and retains one previous backup. Recovery rolls unfinished transactions back. Main and enabled TEE-SIM/OMK consumers are prepared together; multiple paths cannot have a globally atomic rename. The journal handles interruption, but cannot make external consumers observe a simultaneous multi-file change. Tricky Store documents immediate config reload; no unconditional keystore restart is used. Other consumer-specific reload behavior remains a runtime compatibility concern.
+Installation: parse XML/DER, validate private/public pairing, chain signatures, supplied trusted root and dates. File write transaction is staged on each target filesystem, preserves existing ownership/mode/context, journals bounded original copies, renames and syncs directories, and verifies bytes. Copies of the previous content exist only inside the transaction journal and are removed when it completes: no backup of a key stays on the device. Recovery rolls unfinished transactions back and removes a stale `keybox.autopilot-backup.xml` left by older versions. Main and enabled TEE-SIM/OMK consumers are prepared together; multiple paths cannot have a globally atomic rename. The journal handles interruption, but cannot make external consumers observe a simultaneous multi-file change. Tricky Store documents immediate config reload; no unconditional keystore restart is used. Other consumer-specific reload behavior remains a runtime compatibility concern.
 
 Tests: host race detector, vet, POSIX ShellCheck, JavaScript parsing; the Go test binary also runs under Android root in a private RAM directory. Android-only tests exercise SELinux labels, actual same-filesystem commits and journal recovery using synthetic fixtures, never the working keybox. Device identity and rollback copies are documented outside the module in the project implementation record.
 
@@ -72,3 +74,39 @@ a malformed response cannot erase previously known revocations. Runtime metadata
 has explicit byte limits. A corrupt config revision blocks installation but does
 not prevent stopping the service. Pilot displays verified process liveness rather
 than interpreting an old heartbeat during suspend as a dead process.
+
+## Consumer acceptance (2026-11-13)
+
+`status` reports `consumer` (`id`, `required`, `present`, `state`, `evidence`, `checked`), `time_source` and `config_notes`.
+
+- A keybox must fit the strict consumer profile (`EC PRIVATE KEY` / `RSA PRIVATE KEY`). A local file that does not is reported as `consumer_incompatible` and replaced; candidates that do not fit are skipped. Tricky Store 1.4.1 cannot load PKCS#8 (`PRIVATE KEY`) keys.
+- After each install, when the file changes, and at most every `probe_interval_hours`, the engine asks the consumer to re-read the file (open for append and close, content unchanged) and reads its verdict from the log after a random marker. No marker means `unknown`: nothing is rolled back and nothing is reported as accepted.
+- A confirmed refusal restores the previous valid key, remembers the refused fingerprint (`.autopilot-rejected.json`, 64 entries, oldest evicted) and tries the next candidate.
+- If the required consumer is not installed, no search or install is attempted (`required_consumer_missing`).
+- Revocation lookups match both hex and decimal serials (Google lists 64-bit serials in decimal). Automatic installs require a fresh revocation list.
+- Catalog entries that are expired or already listed by Google are not downloaded; longer-lived entries are tried first.
+- Time evidence falls back to the `Date` header of a TLS-authenticated Google response when Android's network time is unavailable.
+
+Limits: acceptance is inferred from the consumer's log, not from Google. Only a real Play Integrity check measures the verdict.
+
+## Policy file: /data/adb/Box-Brain/autopilot.conf
+
+Read at the start of every cycle; a change also wakes the daemon. `key = value`, `#` comments, at most 16 KiB and 200 lines. Out-of-range numbers are clamped and unsafe lines are skipped one by one and reported in `status.config_notes`; a file over the size or line limit is ignored and the defaults apply. The file cannot switch off HTTPS, chain verification or atomic installs.
+
+| Key | Default | Bounds |
+|---|---|---|
+| `candidate_budget` | 5 | 1..10 candidates downloaded per search |
+| `source_priority` | `TAKR,@Xiaomi_Lei_Jun,@Samsung_Jae_Yong,Yuri` | up to 16 names, unlisted sources last |
+| `renew_before_hours` | 24 | 6..168 |
+| `probe_interval_hours` | 6 | 1..48 |
+| `probe_settle_seconds` | 5 | 1..15 |
+| `extra_hosts` | none | up to 8 plain DNS names (HTTPS redirect hosts) |
+| `consumer.tricky_store.modules` | `tricky_store` | module ids |
+| `consumer.tricky_store.tag` | `TrickyStore` | log tag |
+| `consumer.tricky_store.rejection` | `Load Keybox failed`, `valid keybox.xml was not present` | repeatable regular expression, up to 8 |
+
+Example: if a Tricky Store update changes its log wording, add `consumer.tricky_store.rejection = new text` and no rebuild is needed.
+
+## Doctor
+
+`sh webroot/common_scripts/autopilot.sh doctor` is independent of the compiled engine (it works even when the binary is missing). It prints `OK/WARN/FAIL` lines for tools, consumer, key format, certificate count and validity (parsed from DER with `awk`), the acceptance probe and the engine status, never prints key material, and exits 1 on any FAIL. It reads the same `autopilot.conf` keys as the engine for what it checks (`renew_before_hours` and `probe_settle_seconds` with the same clamping, and `consumer.tricky_store.modules`, `.tag`, `.rejection` with the same validation). Host tests: `sh autopilot-v2/test_doctor.sh`.
