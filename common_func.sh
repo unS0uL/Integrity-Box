@@ -24,7 +24,6 @@ log() {    # log <message>
 update_module_description() {
   MODPATH="/data/adb/modules/playintegrityfix"
   PROP="$MODPATH/module.prop"
-  BAK="$PROP.bak"
   P="$MODPATH/custom.pif.prop"
 
   # Find BusyBox
@@ -57,8 +56,6 @@ update_module_description() {
   # Build description
   DESC="current spoofing indentify: $MODEL ($DEVICE) | InitSDK: $INIT_SDK"
 
-  # Backup original properties
-  [ ! -f "$BAK" ] && "$bb" cp "$PROP" "$BAK"
 
   # Update description
   "$bb" sed -i '/^description=/d' "$PROP"
@@ -325,6 +322,8 @@ update_targets() {
   # Install the new target list.
   if mv -f "$TMP" "$TARGET"; then
     success=1
+    # The old list was only a transaction backup; do not leave a copy on the device.
+    [ "$made_backup" -eq 1 ] && rm -f "$BACKUP"
     echo " ✦ Target verification succeed"
     echo " "
   else
