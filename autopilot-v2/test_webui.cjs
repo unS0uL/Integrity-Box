@@ -55,6 +55,21 @@ const assert = require('node:assert/strict');
   pilotContext.checkAutopilot();
   assert.equal(nodes.get('autopilotToggle').checked, true);
   assert.equal(nodes.get('statusSubtitle').textContent, 'Waiting for service');
+  for (const [consumer, expected] of [
+    [{id: 'tricky_store', present: true, state: 'rejected', evidence: 'rejection_logged'}, 'Tricky Store: refused the key'],
+    [{id: 'tricky_store', present: true, state: 'accepted', evidence: 'no_rejection_logged'}, 'Tricky Store: no refusal logged'],
+    [{id: 'tricky_store', present: true, state: 'unknown', evidence: 'no_log_channel'}, 'Tricky Store: not verified (no_log_channel)'],
+    [{id: 'tricky_store', present: false, state: 'unknown', evidence: 'not_installed'}, 'Tricky Store: not installed'],
+  ]) {
+    response = JSON.stringify({desired_enabled: true, running: true, phase: 'waiting', revocation_state: 'fresh',
+      next_due: '0001-01-01', heartbeat: '2026-01-01T00:00:00Z', consumer});
+    pilotContext.checkAutopilot();
+    assert.equal(nodes.get('githubSubtitle').textContent, expected + ' • Revocation: fresh');
+  }
+  response = JSON.stringify({desired_enabled: true, running: true, phase: 'waiting', revocation_state: 'fresh',
+    next_due: '0001-01-01', heartbeat: '2026-01-01T00:00:00Z', reason: 'required keybox consumer is not installed'});
+  pilotContext.checkAutopilot();
+  assert.equal(nodes.get('githubSubtitle').textContent, 'required keybox consumer is not installed');
   response = 'invalid JSON';
   pilotContext.checkAutopilot();
   assert.equal(nodes.get('statusSubtitle').textContent, 'Status unavailable');

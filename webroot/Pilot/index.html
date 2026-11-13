@@ -702,10 +702,19 @@ function checkAutopilot() {
       document.getElementById('autopilotToggle').checked = state.desired_enabled;
       document.getElementById('statusSubtitle').textContent = state.running ? state.phase : (state.desired_enabled ? 'Waiting for service' : 'Disabled');
       updateHeartbeatUI(state.running ? Math.floor(Date.parse(state.heartbeat)/1000) : 0, state.running);
-      document.getElementById('githubSubtitle').textContent = state.reason || ('Revocation: ' + state.revocation_state);
+      document.getElementById('githubSubtitle').textContent = state.reason || [describeConsumer(state.consumer), 'Revocation: ' + state.revocation_state].filter(Boolean).join(' • ');
       document.getElementById('githubTime').textContent = state.next_due && !state.next_due.startsWith('0001') ? state.next_due : '--';
     } catch { document.getElementById('statusSubtitle').textContent = 'Status unavailable'; }
   });
+}
+
+// Plain-text summary of whether the keybox consumer (Tricky Store) accepted the key.
+function describeConsumer(consumer) {
+  if (!consumer || !consumer.id) return '';
+  if (!consumer.present) return 'Tricky Store: not installed';
+  if (consumer.state === 'accepted') return 'Tricky Store: no refusal logged';
+  if (consumer.state === 'rejected') return 'Tricky Store: refused the key';
+  return 'Tricky Store: not verified (' + (consumer.evidence || 'no evidence') + ')';
 }
 
 function checkMode() { updateModeUI('keybox'); }
