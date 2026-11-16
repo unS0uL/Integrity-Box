@@ -1245,3 +1245,25 @@ func TestSlowDenylistRefreshDoesNotStarveTheSearch(t *testing.T) {
 		t.Fatalf("the search must still run after a slow refresh: %+v", m.e.status.PIF)
 	}
 }
+
+// The release listing is down but a guessed banned-* file is readable: the bans are merged, the refresh
+// is reported as a FAILURE and the denylist is NOT thereby declared known (the listing is how new bans appear).
+func TestListingDownWithAReadableFallbackFileIsAFailureAndNotKnown(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	m.net.apiDown = true
+	err := m.e.refreshBanned(context.Background())
+	if err == nil {
+		t.Fatal("a refresh that could not read the listing must report failure")
+	}
+	if m.e.pifBannedKnown {
+		t.Fatal("guessed names alone must not mark the denylist as known")
+	}
+	if !m.e.pifBanned["ZP11.260918.007"] {
+		t.Fatalf("the readable file must still be merged: %v", m.e.pifBanned)
+	}
+	// ... and through pifMaintain the failure is counted, so the retry pauses grow
+	m.maintain(true)
+	if m.e.pifBannedFails != 1 {
+		t.Fatalf("failures = %d, want 1", m.e.pifBannedFails)
+	}
+}
