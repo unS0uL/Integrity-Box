@@ -702,10 +702,20 @@ function checkAutopilot() {
       document.getElementById('autopilotToggle').checked = state.desired_enabled;
       document.getElementById('statusSubtitle').textContent = state.running ? state.phase : (state.desired_enabled ? 'Waiting for service' : 'Disabled');
       updateHeartbeatUI(state.running ? Math.floor(Date.parse(state.heartbeat)/1000) : 0, state.running);
-      document.getElementById('githubSubtitle').textContent = state.reason || [describeConsumer(state.consumer), 'Revocation: ' + state.revocation_state].filter(Boolean).join(' • ');
+      document.getElementById('githubSubtitle').textContent = state.reason || [describeConsumer(state.consumer), describePIF(state.pif), 'Revocation: ' + state.revocation_state].filter(Boolean).join(' • ');
       document.getElementById('githubTime').textContent = state.next_due && !state.next_due.startsWith('0001') ? state.next_due : '--';
     } catch { document.getElementById('statusSubtitle').textContent = 'Status unavailable'; }
   });
+}
+
+// Plain-text summary of the PIF fingerprint and the Tricky Store patch pair (AUTOPILOT_V4_PIF_DESIGN.md).
+function describePIF(pif) {
+  if (!pif || !pif.state || pif.state === 'off') return '';
+  const names = { ok: 'ok', expiring: 'expires soon', expired: 'expired', banned: 'withdrawn by the maintainer', invalid: 'unreadable', absent: 'not found' };
+  let text = 'Fingerprint: ' + (names[pif.state] || pif.state);
+  if (pif.patch_pair === 'mismatch') text += ', patch MISMATCH';
+  else if (pif.patch_pair === 'match') text += ', patch matches';
+  return text;
 }
 
 // Plain-text summary of whether the keybox consumer (Tricky Store) accepted the key.

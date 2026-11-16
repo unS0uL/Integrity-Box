@@ -33,6 +33,7 @@ type Engine struct {
 	searched                   bool
 	lastSearchBoot             float64
 	urgentEvidence             string
+	noPublish                  bool                                    // one-shot CLI commands that must not overwrite the daemon status
 	pifBannedKnown             bool                                    // a denylist was read at least once (now or on an earlier boot)
 	pifFailures                int                                     // consecutive failed installs (backoff)
 	scope                      string                                  // prefix of per-host cooldown keys: the PIF contour must not cool down the keybox contour

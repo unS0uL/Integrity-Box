@@ -159,6 +159,25 @@ func main() {
 		e.forcedTier = os.Args[2]
 		err = e.cycle(ctx, false)
 		e.publish()
+	case "pif-refresh":
+		// One fingerprint-contour pass (the Action button and the daemon share this code). It never
+		// touches the daemon's status file. Exit 3 means "pif_mode=off": the caller may use its legacy path.
+		e.noPublish = true
+		e.reloadPolicy()
+		if e.pifPolicy().Mode == "off" || e.pifPropPath() == "" {
+			fmt.Println("pif: disabled (pif_mode=off)")
+			os.Exit(3)
+		}
+		searchLock, lerr := lock(filepath.Join(e.ram, "search.lock"))
+		if lerr != nil {
+			err = errors.New("another AutoPilot cycle is running; try again in a minute")
+			break
+		}
+		_ = e.checkTime(ctx) // the audit and the patch repair need no clock; replacements do
+		e.pifMaintain(ctx, false)
+		searchLock.Close()
+		s := e.status.PIF
+		fmt.Printf("pif: state=%s id=%s patch=%s pair=%s applied=%s action=%s reason=%s\n", s.State, s.ID, s.Patch, s.PatchPair, s.Applied, s.Action, s.Reason)
 	case "run-once":
 		err = e.cycle(ctx, false)
 		e.publish()

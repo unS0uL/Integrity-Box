@@ -31,6 +31,9 @@ type Status struct {
 }
 
 func (e *Engine) publish() {
+	if e.noPublish {
+		return
+	}
 	e.status.Enabled = e.enabled()
 	e.status.NextSearch = time.Time{}
 	e.status.NextCRL = time.Time{}
