@@ -377,9 +377,13 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
 fi
 
 if [ ! -f $TRICKY/security_patch.txt ]; then
-cat <<EOF > $TRICKY/security_patch.txt
-all=2026-11-05
-EOF
+# The patch must equal the PIF fingerprint's SECURITY_PATCH (Law 15); the literal is only a fallback.
+INIT_PATCH="$(sed -n 's/^SECURITY_PATCH=//p' "$MODPATH/custom.pif.prop" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
+case "$INIT_PATCH" in
+    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) ;;
+    *) INIT_PATCH="2026-11-05" ;; # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
+esac
+echo "all=$INIT_PATCH" > $TRICKY/security_patch.txt
 fi
  
 install_module
@@ -670,7 +674,14 @@ cat <<'EOF' > "$boot/prop.sh"
 #!/system/bin/sh
 
 # CONFIG
-PATCH_DATE="2026-11-05"
+# The patch is whatever the active PIF fingerprint declares (Law 15: one owner of the invariant,
+# security_patch.txt == custom.pif.prop SECURITY_PATCH). The literal is only a fallback.
+PIF_PROP="/data/adb/modules/playintegrityfix/custom.pif.prop"
+PATCH_DATE="$(sed -n 's/^SECURITY_PATCH=//p' "$PIF_PROP" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
+case "$PATCH_DATE" in
+    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) ;;
+    *) PATCH_DATE="2026-11-05" ;; # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
+esac
 FILE_PATH="/data/adb/tricky_store/security_patch.txt"
 SKIP_FILE="/data/adb/Box-Brain/skip"
 LOG_DIR="/data/adb/Box-Brain/Integrity-Box-Logs"

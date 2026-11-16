@@ -481,13 +481,28 @@ update_targets() {
   [ "$success" -eq 1 ]
 }
 
+# Single source of truth for the spoofed security patch: the SECURITY_PATCH of the
+# active PIF fingerprint (custom.pif.prop). Tricky Store's security_patch.txt must
+# equal it, otherwise DEVICE integrity fails (incident 2026-11-16, Law 15).
+# Prints YYYY-MM-DD, or returns 1 when the file or value is missing/invalid.
+patch_from_pif() {
+  local f="${1:-${MODPATH:-/data/adb/modules/playintegrityfix}/custom.pif.prop}" v
+  [ -f "$f" ] || return 1
+  v="$(sed -n 's/^SECURITY_PATCH=//p' "$f" | head -n 1 | tr -d ' \t\r')"
+  case "$v" in
+    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) echo "$v" ;;
+    *) return 1 ;;
+  esac
+}
+
 handle_security_patch() {
   local BOX="/data/adb/Box-Brain"
   local LOGDIR="$BOX/Integrity-Box-Logs"
   local PATCH_LOG="$LOGDIR/patch.log"
   local PATCH_FLAG="$BOX/patch"
   local SKIP_FILE="$BOX/skip"
-  local PATCH_DATE="2026-10-05"
+  local PATCH_DATE
+  PATCH_DATE="$(patch_from_pif)" || PATCH_DATE="2026-10-05" # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
   local PROP_MAIN="ro.build.version.security_patch"
   local FILE_PATH="/data/adb/tricky_store/security_patch.txt"
   local BRAND_PROP
