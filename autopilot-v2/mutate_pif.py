@@ -1,5 +1,6 @@
 """Mutation harness for the PIF contour (run after changing pif*.go): every mutation is applied to an in-memory copy of the originals, tested, and
 ALWAYS undone in `finally`. Exit status reflects survivors. Usage: python3 mutate_pif.py <autopilot-v2 dir>; every mutation must be reported as killed"""
+import os
 import subprocess
 import sys
 
@@ -71,9 +72,13 @@ def precheck():
     if st.stdout.strip():
         print('REFUSED: commit (or stash) your changes first; the harness edits these files in place:\n' + st.stdout)
         sys.exit(3)
-    listed = subprocess.run(['go', 'test', '-list', '.', './...'], cwd=D, capture_output=True, text=True).stdout.split()
-    tests = [t for t in listed if t.startswith('Test')]
+    # Coverage is demanded for the tests OF THIS CONTOUR (pif*_test.go): the older keybox suite is not what these
+    # mutations are about. A test that the filter never runs would make every mutation it should catch look "alive".
+    import glob
     import re
+    tests = []
+    for path in sorted(glob.glob(os.path.join(D, 'pif*_test.go'))):
+        tests += re.findall(r'^func (Test\w+)\(', open(path).read(), re.M)
     both = RUN + '|Lifecycle|DaemonCycleRate'
     missing = [t for t in tests if not re.search(both, t)]
     if missing:
