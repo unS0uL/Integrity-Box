@@ -38,6 +38,7 @@ type Engine struct {
 	noPublish                      bool                                                         // one-shot CLI commands that must not overwrite the daemon status
 	pifBannedKnown                 bool                                                         // a denylist was read at least once (now or on an earlier boot)
 	pifBannedFails, pifSearchFails int                                                          // consecutive unreachable-source failures (exponential backoff)
+	pifSyncFails                   int                                                          // consecutive failures to repair security_patch.txt (backoff of the wake-ups)
 	pifFailures                    int                                                          // consecutive failed installs (backoff)
 	scope                          string                                                       // prefix of per-host cooldown keys: the PIF contour must not cool down the keybox contour
 	contextOf                      func(path string) (string, error)                            // test seam: how the SELinux context of a file is read (default ls -Zd)

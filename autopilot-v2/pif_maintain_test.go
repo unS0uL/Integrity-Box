@@ -224,7 +224,7 @@ func TestEligibilityTable(t *testing.T) {
 	}{
 		{"broken current accepts any valid candidate", nov, oct, "banned", false, nil, true, ""},
 		{"expired current accepts", nov, oct, "expired", false, nil, true, ""},
-		{"absent current is never created", nov, pifFile{Props: map[string]string{}}, "absent", false, nil, false, "state_absent"},
+		{"a missing file is created", nov, pifFile{Props: map[string]string{}}, "absent", false, nil, true, ""},
 		{"expiring current needs a strictly later expiry", nov, oct, "expiring", false, nil, true, ""},
 		{"equal expiry is not newer", oct, mustPIF(t, octoberPIF), "expiring", false, nil, false, "same_build"},
 		{"older candidate is not newer", oct, nov, "expiring", false, nil, false, "not_newer"},
@@ -259,7 +259,9 @@ func TestMaintainLeavesHealthyAndForeignStatesAlone(t *testing.T) {
 		{"clock not verified", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) {
 			m.e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
 		}},
-		{"no fingerprint file at all", "", "all=2026-10-05\n", nil},
+		{"no fingerprint file but a JSON fingerprint feeds the module", "", "all=2026-10-05\n", func(m *maintainFixture) {
+			_ = os.WriteFile(filepath.Join(m.e.moduleRoot, "custom.pif.json"), []byte("{}"), 0644)
+		}},
 		{"invalid fingerprint is reported, not overwritten", strings.Replace(octoberPIF, "ID=ZP11.260918.007", "ID=OTHER", 1), "all=2026-10-05\n", nil},
 		{"dry run", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) { m.e.dryRun = true }},
 	}
@@ -420,8 +422,10 @@ func TestRefreshBannedKeepsKnownBansWhenNothingIsReadable(t *testing.T) {
 	// listing unavailable -> fall back to the known file names
 	m.net.down = false
 	m.net.apiDown = true
-	if err := m.e.refreshBanned(context.Background()); err != nil {
-		t.Fatal(err)
+	// the listing is down: the fallback names are still read (the bans are kept), but the refresh is a
+	// FAILURE (retried with a pause), because it did not see the whole truth
+	if err := m.e.refreshBanned(context.Background()); err == nil {
+		t.Fatal("an unreadable release listing must be reported as a failed refresh")
 	}
 	if !m.e.pifBanned["ZP11.260918.007"] {
 		t.Fatalf("fallback names must still read the October ban: %v", m.e.pifBanned)
@@ -934,6 +938,7 @@ func TestDeadlineWakesTheDaemonOnlyWhenThereIsSomethingToDo(t *testing.T) {
 	e := m.e
 	now := e.now()
 	e.pifAudit(true)
+	e.status.TimeState = "verified"
 	// healthy: the renew window opens at expiry (2026-11-27) minus 72h
 	if d := e.pifDeadline(); d.Format("2006-01-02") != "2026-11-24" {
 		t.Fatalf("healthy: wake at the opening of the renew window, got %v", d)
@@ -1055,5 +1060,188 @@ func TestEachMaintainCallChecksTheClockUnlessTheCycleJustDid(t *testing.T) {
 	m.maintain(true)
 	if *n != 2 {
 		t.Fatalf("got %d checks for 2 calls", *n)
+	}
+}
+
+// ---- second independent review: autonomy over weeks ----
+
+const stablePixel = `MANUFACTURER=Google
+MODEL=Pixel 8 Pro
+FINGERPRINT=google/husky/husky:14/AP2A.240805.005/12025142:user/release-keys
+BRAND=google
+PRODUCT=husky
+DEVICE=husky
+RELEASE=14
+ID=AP2A.240805.005
+INCREMENTAL=12025142
+TYPE=user
+TAGS=release-keys
+SECURITY_PATCH=2024-08-05
+DEVICE_INITIAL_SDK_INT=34
+`
+
+// A stable Pixel fingerprint chosen by the user has no Canary lifetime: it is never judged expired and
+// never replaced (the Google source would even swap the device model for a Pixel 6a).
+func TestAStableNonCanaryFingerprintIsNeverManaged(t *testing.T) {
+	m := newMaintain(t, stablePixel, "all=2024-08-05\n")
+	m.e.pifBanned = map[string]bool{"AP2A.240805.005": true} // even a ban does not make it ours
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+	m.e.policy.PIF.Sources = []string{"archive", "google"}
+	m.maintain(true)
+	if m.e.status.PIF.State != "custom" || m.propText() != stablePixel || m.restart != 0 || m.net.hits[pifArchiveBase+"meow.prop"] != 0 {
+		t.Fatalf("a non-Canary fingerprint must be left alone: %+v", m.e.status.PIF)
+	}
+	if d := m.e.pifDeadline(); !d.IsZero() {
+		t.Fatalf("and it must not wake the daemon: %v", d)
+	}
+}
+
+// A file removed by a module update (or a user) is recreated: there is nothing of the user's to lose,
+// and the pair is brought into agreement. A module fed by a JSON fingerprint is left alone.
+func TestAMissingFingerprintFileIsRecreatedUnlessAJSONSourceFeedsTheModule(t *testing.T) {
+	m := newMaintain(t, "", "all=2026-10-05\n")
+	m.maintain(true)
+	if m.e.status.PIF.ID != "ZP11.261016.008" || m.e.status.PIF.PatchPair != "match" || m.patchText() != "all=2026-11-05\n" {
+		t.Fatalf("recreated: %+v", m.e.status.PIF)
+	}
+	if !strings.Contains(m.propText(), "# Configuration") || !strings.Contains(m.propText(), "spoofBuild=1") {
+		t.Fatalf("a recreated file carries the default configuration:\n%s", m.propText())
+	}
+	j := newMaintain(t, "", "all=2026-10-05\n")
+	if err := os.WriteFile(filepath.Join(j.e.moduleRoot, "custom.pif.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	j.maintain(true)
+	if _, err := os.Stat(j.prop); err == nil || j.e.status.PIF.State != "custom" {
+		t.Fatalf("a JSON-fed module must not get a competing .prop: %+v", j.e.status.PIF)
+	}
+}
+
+func TestACandidateWithoutABuildDateIsNeverTrusted(t *testing.T) {
+	e := &Engine{brain: t.TempDir(), pifBanned: map[string]bool{}}
+	undated := mustPIF(t, strings.NewReplacer("ZP11.261016.008", "NIGHTLYBUILD", "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2026-11-05").Replace(novemberMeow))
+	for _, state := range []string{"banned", "expired", "absent", "expiring"} {
+		if ok, why := e.pifEligible(undated, mustPIF(t, octoberPIF), state, time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC), defaultPIFPolicy()); ok || why != "candidate_undated" {
+			t.Errorf("%s: eligible=%v reason=%q", state, ok, why)
+		}
+	}
+}
+
+// Somebody else (the Action button) holds the search lock: the cycle reports "busy", a distinct error.
+func TestCycleReportsABusyLockWithItsOwnError(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	held, err := lock(filepath.Join(m.e.ram, "search.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	if err := m.e.cycle(context.Background(), true); !errors.Is(err, errSearchBusy) {
+		t.Fatalf("got %v, want errSearchBusy", err)
+	}
+}
+
+// A keybox-side problem that makes cycle() return early must not take the fingerprint contour with it.
+func TestFingerprintContourSurvivesEveryEarlyReturnOfTheCycle(t *testing.T) {
+	breakers := map[string]func(m *maintainFixture){
+		"damaged configuration revision": func(m *maintainFixture) {
+			_ = os.WriteFile(filepath.Join(m.e.brain, ".autopilot-config-revision"), []byte("not a number"), 0600)
+		},
+		"unreadable anchor metadata": func(m *maintainFixture) {
+			_ = os.WriteFile(filepath.Join(m.e.brain, ".autopilot-known-anchors.json"), make([]byte, 9000), 0600)
+		},
+	}
+	for name, breakIt := range breakers {
+		m := newMaintain(t, octoberPIF, "all=2026-11-05\n") // banned fingerprint AND a mismatched pair
+		m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+		m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+		breakIt(m)
+		if err := m.e.cycle(context.Background(), true); err == nil {
+			t.Errorf("%s: the keybox side must report its problem", name)
+		}
+		if m.e.status.PIF.ID != "ZP11.261016.008" || m.e.status.PIF.PatchPair != "match" {
+			t.Errorf("%s: the fingerprint contour did not run: %+v", name, m.e.status.PIF)
+		}
+	}
+}
+
+// An unwritable security_patch.txt must not be retried every 30 minutes forever.
+func TestUnrepairablePatchFileBacksOffTheWakeUps(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not stop root")
+	}
+	synced := strings.Replace(octoberPIF, "SECURITY_PATCH=2026-10-05", "SECURITY_PATCH=2026-11-05", 1)
+	m := newMaintain(t, synced, "all=2026-10-05\n")
+	m.e.status.TimeState = "verified"
+	tsDir := filepath.Dir(m.patch)
+	if err := os.Chmod(tsDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(tsDir, 0755)
+	f, p := m.e.pifAudit(true)
+	for i := 0; i < 3; i++ {
+		_ = m.e.pifSyncPatch(f, p)
+	}
+	if m.e.pifSyncFails != 3 {
+		t.Fatalf("failures = %d", m.e.pifSyncFails)
+	}
+	m.e.status.PIF.PatchPair = "mismatch"
+	if d := m.e.pifDeadline().Sub(m.e.now()); d < 7*time.Hour {
+		t.Fatalf("after 3 failures the wake-up must back off (8h), got %v", d)
+	}
+	if err := os.Chmod(tsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	f, p = m.e.pifAudit(true)
+	if err := m.e.pifSyncPatch(f, p); err != nil || m.e.pifSyncFails != 0 {
+		t.Fatalf("a success resets the counter: err=%v fails=%d", err, m.e.pifSyncFails)
+	}
+}
+
+// With an unverified clock an expired/banned/expiring fingerprint must not make the daemon wake every 30 minutes.
+func TestUnverifiedClockDoesNotCauseThirtyMinuteWakeUps(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	e := m.e
+	e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
+	e.clock = func() time.Time { return time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC) } // far past the expiry
+	e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+	e.pifBannedKnown, e.pifBannedDue = true, 1e12
+	for i := 0; i < 3; i++ {
+		e.pifMaintain(context.Background(), true)
+		if d := e.pifDeadline().Sub(e.now()); d < 2*time.Hour {
+			t.Fatalf("round %d (state %s): wake-up in %v, want at least 2h while the clock is unverified", i, e.status.PIF.State, d)
+		}
+	}
+	// the same state with a verified clock may wake soon (a search is due)
+	e.timeCheck = func(context.Context) error { return nil }
+	m.net.down = true
+	e.pifMaintain(context.Background(), false)
+	if d := e.pifDeadline().Sub(e.now()); d > 3*time.Hour && e.status.PIF.State != "expired" && e.status.PIF.State != "banned" {
+		t.Fatalf("verified clock: %v in state %s", d, e.status.PIF.State)
+	}
+}
+
+// A slow release listing must not eat the search: it has its own slice of the budget.
+func TestSlowDenylistRefreshDoesNotStarveTheSearch(t *testing.T) {
+	old := pifRefreshBudget
+	pifRefreshBudget = 80 * time.Millisecond
+	defer func() { pifRefreshBudget = old }()
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	inner := m.e.request
+	m.e.request = func(r *http.Request) (*http.Response, error) {
+		if r.URL.String() == pifReleaseAPI {
+			<-r.Context().Done() // the listing hangs until its slice ends
+			return nil, r.Context().Err()
+		}
+		return inner(r)
+	}
+	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+	m.e.pifBannedKnown = true // known from an earlier boot
+	started := time.Now()
+	m.maintain(true)
+	if time.Since(started) > 5*time.Second {
+		t.Fatalf("the hanging listing took %v", time.Since(started))
+	}
+	if m.e.status.PIF.ID != "ZP11.261016.008" {
+		t.Fatalf("the search must still run after a slow refresh: %+v", m.e.status.PIF)
 	}
 }

@@ -26,6 +26,9 @@ spoofSignature=0
 spoofVendingSdk=0
 verboseLogs=0`
 
+// pifRefreshBudget is the slice of the budget the denylist refresh may use (a variable for the tests).
+var pifRefreshBudget = 18 * time.Second
+
 const (
 	pifBudget       = 45 * time.Second // the whole fingerprint maintenance of one cycle
 	pifMaxBackoff   = 24 * time.Hour
@@ -77,7 +80,11 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	cleanStale(e.root, pifStaleTmpAge)
 	if timeOK && (!automatic || e.uptime() >= e.pifBannedDue) {
 		wait := 6 * time.Hour
-		if err := e.refreshBanned(ctx); err != nil {
+		// the denylist refresh gets its own slice of the budget: a slow network must not eat the search
+		refreshCtx, stop := context.WithTimeout(ctx, pifRefreshBudget)
+		err := e.refreshBanned(refreshCtx)
+		stop()
+		if err != nil {
 			e.pifBannedFails++
 			wait = pifBackoff(e.pifBannedFails) // 2, 4, 8, 16, 24 h: an outage must not be hammered
 			logEvent("pif_denylist_error", "local", e.pifBannedFails)
@@ -94,7 +101,7 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 		return
 	}
 	state := e.status.PIF.State
-	if !(state == "banned" || state == "expired" || state == "expiring" || state == "ok" && pol.FollowLatest) {
+	if !(state == "banned" || state == "expired" || state == "expiring" || state == "absent" || state == "ok" && pol.FollowLatest) {
 		return
 	}
 	if automatic && e.uptime() < e.pifSearchDue {

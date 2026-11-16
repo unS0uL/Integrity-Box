@@ -495,6 +495,12 @@ patch_from_pif() {
   esac
 }
 
+# Policy helpers shared with the boot script (service.d/prop.sh): see pif_policy.sh.
+_pif_policy="${MODPATH:-/data/adb/modules/playintegrityfix}/pif_policy.sh"
+[ -f "$_pif_policy" ] && . "$_pif_policy"
+unset _pif_policy
+command -v pif_may_write_patch >/dev/null 2>&1 || pif_may_write_patch() { [ ! -f /data/adb/Box-Brain/patch ]; }
+
 handle_security_patch() {
   local BOX="/data/adb/Box-Brain"
   local LOGDIR="$BOX/Integrity-Box-Logs"
@@ -502,7 +508,7 @@ handle_security_patch() {
   local PATCH_FLAG="$BOX/patch"
   local SKIP_FILE="$BOX/skip"
   local PATCH_DATE
-  PATCH_DATE="$(patch_from_pif)" || PATCH_DATE="2026-10-05" # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
+  PATCH_DATE="$(patch_from_pif)" || PATCH_DATE="" # no literal fallback: without a patch in the fingerprint nothing is written
   local PROP_MAIN="ro.build.version.security_patch"
   local FILE_PATH="/data/adb/tricky_store/security_patch.txt"
   local BRAND_PROP
@@ -524,12 +530,21 @@ handle_security_patch() {
 
     echo " ✦ Updated Patch to Stock"
   else
-    if ! echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$PATCH_LOG"; then
-      echo " ✖ Failed to write security patch configuration."
-      return 1
+    if [ -z "$PATCH_DATE" ]; then
+      echo " ✦ custom.pif.prop has no valid SECURITY_PATCH: the patch is left as it is"
+      echo "Patch handling skipped (no patch in the fingerprint)" >> "$PATCH_LOG"
+      return 0
     fi
 
-    echo " ✦ Spoofed Attestation Patch to $PATCH_DATE"
+    if pif_may_write_patch; then
+      if ! echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$PATCH_LOG"; then
+        echo " ✖ Failed to write security patch configuration."
+        return 1
+      fi
+      echo " ✦ Spoofed Attestation Patch to $PATCH_DATE"
+    else
+      echo " ✦ Patch policy (pif_mode / pif_sync_patch): security_patch.txt is not rewritten"
+    fi
 
     CURRENT_PROP="$(getprop "$PROP_MAIN" | tr -d ' \t\r\n')"
     echo "Current $PROP_MAIN: $CURRENT_PROP" >> "$PATCH_LOG"

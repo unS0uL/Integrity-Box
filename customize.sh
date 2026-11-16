@@ -377,13 +377,12 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
 fi
 
 if [ ! -f $TRICKY/security_patch.txt ]; then
-# The patch must equal the PIF fingerprint's SECURITY_PATCH (Law 15); the literal is only a fallback.
+# The patch must equal the PIF fingerprint's SECURITY_PATCH (Law 15). Without a valid one nothing is
+# invented: Tricky Store then simply has no patch override.
 INIT_PATCH="$(sed -n 's/^SECURITY_PATCH=//p' "$MODPATH/custom.pif.prop" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
 case "$INIT_PATCH" in
-    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) ;;
-    *) INIT_PATCH="2026-11-05" ;; # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
+    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) echo "all=$INIT_PATCH" > $TRICKY/security_patch.txt ;;
 esac
-echo "all=$INIT_PATCH" > $TRICKY/security_patch.txt
 fi
  
 install_module
@@ -675,12 +674,14 @@ cat <<'EOF' > "$boot/prop.sh"
 
 # CONFIG
 # The patch is whatever the active PIF fingerprint declares (Law 15: one owner of the invariant,
-# security_patch.txt == custom.pif.prop SECURITY_PATCH). The literal is only a fallback.
+# security_patch.txt == custom.pif.prop SECURITY_PATCH). There is NO literal fallback: without a valid
+# patch in the fingerprint this script leaves the patch alone.
 PIF_PROP="/data/adb/modules/playintegrityfix/custom.pif.prop"
+PIF_POLICY="/data/adb/modules/playintegrityfix/pif_policy.sh"
 PATCH_DATE="$(sed -n 's/^SECURITY_PATCH=//p' "$PIF_PROP" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
 case "$PATCH_DATE" in
     [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) ;;
-    *) PATCH_DATE="2026-11-05" ;; # lint-ok: AL011 fallback only when custom.pif.prop has no valid SECURITY_PATCH
+    *) PATCH_DATE="" ;;
 esac
 FILE_PATH="/data/adb/tricky_store/security_patch.txt"
 SKIP_FILE="/data/adb/Box-Brain/skip"
@@ -738,9 +739,32 @@ if [ -f "/data/adb/modules/playintegrityfix/disable" ]; then
     exit 0
 fi
 
-# SAVE PATCH DATE
-mkdir -p "/data/adb/tricky_store"
-echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$LOG_FILE"
+# The user's choices come first: the stock-patch flag means "do not spoof the patch" (file AND properties)
+if [ -f "/data/adb/Box-Brain/patch" ]; then
+    writelog "Stock patch flag is set: leaving the patch alone"
+    exit 0
+fi
+if [ -z "$PATCH_DATE" ]; then
+    writelog "No valid SECURITY_PATCH in custom.pif.prop: leaving the patch alone"
+    exit 0
+fi
+
+# SAVE PATCH DATE (only when the policy allows it, and without touching a file that is already right)
+WRITE_FILE=1
+if [ -f "$PIF_POLICY" ]; then
+    . "$PIF_POLICY"
+    pif_may_write_patch || WRITE_FILE=0
+fi
+if [ "$WRITE_FILE" = 1 ]; then
+    mkdir -p "/data/adb/tricky_store"
+    if grep -qx "all=$PATCH_DATE" "$FILE_PATH" 2>/dev/null; then
+        writelog "security_patch.txt already holds $PATCH_DATE"
+    else
+        echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$LOG_FILE"
+    fi
+else
+    writelog "Patch policy (pif_mode / pif_sync_patch): security_patch.txt is not rewritten"
+fi
 
 # APPLY SYSTEM+VENDOR SECURITY PATCH
 if [ -f "$SKIP_FILE" ]; then

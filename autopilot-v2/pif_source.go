@@ -24,7 +24,7 @@ const (
 
 var (
 	pifBannedName     = regexp.MustCompile(`^banned-[a-z0-9._-]{1,60}\.prop$`)
-	pifFallbackBanned = []string{"banned-october-meow.prop"} // when the release listing is unreachable
+	pifFallbackBanned = []string{"banned-october-meow.prop"} // when the release listing is unreachable (plus guessed month names)
 	pifIDLine         = regexp.MustCompile(`(?m)^(ID|FINGERPRINT)=([A-Za-z0-9 ._:/+()-]{1,200})\s*$`)
 )
 
@@ -59,7 +59,7 @@ func (e *Engine) loadBanned() {
 func (e *Engine) bannedNames(ctx context.Context) (names []string, listed bool) {
 	body, err := e.get(ctx, pifReleaseAPI, 256<<10)
 	if err != nil {
-		return pifFallbackBanned, false
+		return e.guessBannedNames(), false
 	}
 	var rel struct {
 		Assets []struct {
@@ -67,7 +67,7 @@ func (e *Engine) bannedNames(ctx context.Context) (names []string, listed bool) 
 		} `json:"assets"`
 	}
 	if json.Unmarshal(body, &rel) != nil {
-		return pifFallbackBanned, false
+		return e.guessBannedNames(), false
 	}
 	seen := map[string]bool{}
 	for _, a := range rel.Assets {
@@ -81,6 +81,21 @@ func (e *Engine) bannedNames(ctx context.Context) (names []string, listed bool) 
 	}
 	// A listing that worked but holds no banned-*.prop is a real answer ("nothing withdrawn yet"), not a failure.
 	return names, true
+}
+
+// guessBannedNames is the best effort when the release listing cannot be read (rate limit, outage):
+// the known October name plus the maintainer's naming scheme (banned-<month>-meow.prop) for this and the
+// two previous months. A missing guess is a 404, which is harmless.
+func (e *Engine) guessBannedNames() []string {
+	out := append([]string(nil), pifFallbackBanned...)
+	now := e.now()
+	for back := 0; back < 3; back++ {
+		name := "banned-" + strings.ToLower(time.Date(now.Year(), now.Month()-time.Month(back), 1, 0, 0, 0, 0, time.UTC).Month().String()) + "-meow.prop"
+		if pifBannedName.MatchString(name) && name != pifFallbackBanned[0] {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // refreshBanned merges the maintainer's banned-*.prop files into the remembered denylist. A ban is a
@@ -123,12 +138,17 @@ func (e *Engine) refreshBanned(ctx context.Context) error {
 			return errors.New("banned list too large")
 		}
 	}
-	e.pifBannedKnown = true
+	if listed {
+		e.pifBannedKnown = true
+	}
 	changed := len(merged) != len(e.pifBanned)
 	for k := range merged {
 		changed = changed || !e.pifBanned[k]
 	}
 	if !changed {
+		if !listed {
+			return errors.New("release listing unavailable; guessed names only")
+		}
 		return nil
 	}
 	e.pifBanned = merged
@@ -137,7 +157,15 @@ func (e *Engine) refreshBanned(ctx context.Context) error {
 		list = append(list, k)
 	}
 	sort.Strings(list)
-	return writeJSON(e.pifBannedPath(), list)
+	if err := writeJSON(e.pifBannedPath(), list); err != nil {
+		return err
+	}
+	if !listed {
+		// The bans that were readable are kept, but the refresh did NOT see the whole truth: report a
+		// failure so that it is retried with a pause and never marks the denylist as known by itself.
+		return errors.New("release listing unavailable; guessed names only")
+	}
+	return nil
 }
 
 // pifEligible decides whether cand may replace the installed fingerprint. Returns a reason when not.
@@ -156,11 +184,14 @@ func (e *Engine) pifEligible(cand, cur pifFile, curState string, now time.Time, 
 		return false, "candidate_patch_far_from_build"
 	}
 	candExp := cand.expiry(pol.Lifetime)
-	if !candExp.IsZero() && !now.Before(candExp) {
+	if candExp.IsZero() {
+		return false, "candidate_undated" // no build date in the id: its age is unknowable
+	}
+	if !now.Before(candExp) {
 		return false, "candidate_expired"
 	}
 	switch curState {
-	case "banned", "expired":
+	case "banned", "expired", "absent":
 		return true, "" // anything valid beats a withdrawn or dead fingerprint
 	case "expiring", "ok":
 		if curState == "ok" && !pol.FollowLatest {

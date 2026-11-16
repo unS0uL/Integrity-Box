@@ -300,6 +300,7 @@ func TestAuditReportsStateWithoutWriting(t *testing.T) {
 	e, _, patchPath := pifEngine(t, octoberPIF, "all=2026-10-05\n")
 	e.pifBanned = map[string]bool{"ZP11.260918.007": true}
 	e.pifAudit(true)
+	e.status.TimeState = "verified"
 	s := e.status.PIF
 	if s.State != "banned" || s.PatchPair != "match" || s.ID != "ZP11.260918.007" || s.Expires != "2026-11-17" {
 		t.Fatalf("status: %+v", s)

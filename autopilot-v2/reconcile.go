@@ -36,14 +36,27 @@ func generation(brain string) string {
 	return b.String()
 }
 
+// errSearchBusy: another cycle (or a manual pif-refresh from the Action button) holds the search lock.
+var errSearchBusy = errors.New("search already running")
+
 func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 	base := ctx
 	e.timeFresh = false
 	searchLock, lockErr := lock(filepath.Join(e.ram, "search.lock"))
 	if lockErr != nil {
-		return errors.New("search already running")
+		return errSearchBusy
 	}
 	defer searchLock.Close()
+	// The fingerprint contour is registered BEFORE every early return of this cycle (a transaction to
+	// recover, a bad configuration revision, missing anchors, a missing keybox consumer ...): BASIC
+	// depends on PIF alone, and the two contours must not hide behind each other's problems. It runs
+	// when the key work is finished, with its own time budget and HTTP cooldown scope.
+	e.reloadPolicy()
+	pifFile, pifPatch := e.pifAudit(false) // expiry is judged later, with a clock verified in this cycle
+	if er := e.pifSyncPatch(pifFile, pifPatch); er != nil {
+		logEvent("pif_cycle_error", "local", 0)
+	}
+	defer func() { e.pifMaintain(base, automatic) }()
 	if !e.dryRun {
 		f, er := lock(filepath.Join(e.ram, "write.lock"))
 		if er != nil {
@@ -69,14 +82,6 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 	e.auditConsumer(ctx, !e.dryRun)
 	// The fingerprint contour is independent of the keybox contour: a failure here is logged and
 	// never blocks (or is blocked by) the key. Patch repair needs no network and no clock.
-	pifFile, pifPatch := e.pifAudit(false) // expiry is judged later, with a clock verified in this cycle
-	if er := e.pifSyncPatch(pifFile, pifPatch); er != nil {
-		logEvent("pif_cycle_error", "local", 0)
-	}
-	// The fingerprint contour runs when the key work is finished, WHATEVER path returns (also when the
-	// keybox consumer is missing: BASIC depends on PIF alone), with its own time budget and its own
-	// HTTP cooldown scope: it can neither starve nor cool down the key contour.
-	defer func() { e.pifMaintain(base, automatic) }()
 	if e.requireConsumer && !e.status.Consumer.Present {
 		e.status.Phase = "required_consumer_missing"
 		return errors.New("required keybox consumer is not installed")
@@ -433,6 +438,13 @@ func (e *Engine) daemon(ctx context.Context) error {
 		lastAttemptBoot = e.uptime()
 		e.searched = false
 		err = e.cycle(ctx, true)
+		if errors.Is(err, errSearchBusy) {
+			// Somebody else (the Action button) holds the lock for a few seconds: try again soon, do not
+			// treat it as a failure that pushes the next cycle two hours away.
+			nextBoot = e.uptime() + 120
+			e.status.Phase = "waiting"
+			continue
+		}
 		failures = e.recordSearchResult(err, failures)
 		if err != nil {
 			e.status.Reason = err.Error()

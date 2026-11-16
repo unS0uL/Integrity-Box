@@ -36,6 +36,16 @@ func (e *Engine) now() time.Time {
 	return time.Now()
 }
 
+// pifJSONSource reports whether the module is fed by a JSON fingerprint instead of custom.pif.prop.
+func (e *Engine) pifJSONSource() bool {
+	for _, p := range []string{filepath.Join(e.moduleRoot, "custom.pif.json"), filepath.Join(e.moduleRoot, "pif.json"), filepath.Join(filepath.Dir(e.brain), "pif.json")} {
+		if exists(p) {
+			return true
+		}
+	}
+	return false
+}
+
 func (e *Engine) pifPropPath() string {
 	if e.moduleRoot == "" {
 		return ""
@@ -102,6 +112,12 @@ func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
 		}
 	}
 	st.State = classifyPIF(f, perr, absent, e.now(), timeOK, pol, e.pifBanned)
+	switch {
+	case perr == nil && !absent && f.Props["RELEASE"] != "CANARY":
+		st.State = "custom" // a stable/beta Pixel the user chose: a Canary lifetime says nothing about it, never replaced
+	case absent && e.pifJSONSource():
+		st.State = "custom" // the fingerprint comes from a JSON file: creating a .prop beside it would fight it
+	}
 	if perr != nil {
 		st.Reason = perr.Error()
 	}
@@ -149,15 +165,18 @@ func (e *Engine) pifSyncPatch(f pifFile, pf patchFile) error {
 		return nil
 	}
 	if err = e.writeMeta(e.patchPath(), want, 0644); err != nil {
+		e.pifSyncFails++
 		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()
-		logEvent("pif_patch_sync_failed", "local", 0)
+		logEvent("pif_patch_sync_failed", "local", e.pifSyncFails)
 		return err
 	}
 	// Prove it by reading the file back (never trust the write call).
 	back, _, err := readOptional(e.patchPath(), 4096)
 	if err != nil || !bytes.Equal(back, want) {
+		e.pifSyncFails++
 		return errors.New("patch file readback differs")
 	}
+	e.pifSyncFails = 0
 	e.status.PIF.PatchPair = parsePatchFile(back).pair(f.patch())
 	e.status.PIF.PatchFile = parsePatchFile(back).Value
 	e.status.PIF.Action = "patch_synced"
@@ -247,11 +266,21 @@ func (e *Engine) pifDeadline() time.Time {
 	s := e.status.PIF
 	now := e.now()
 	soon := now.Add(30 * time.Minute)
+	// Without a verified clock nothing about expiry or replacement can be decided, and a wake-up
+	// cannot change that quickly: do not burn a cycle (and a JVM clock probe) every 30 minutes.
+	later := now.Add(2 * time.Hour)
+	clockOK := e.status.TimeState == "verified"
 	if s.PatchPair == "mismatch" && pol.SyncPatch {
+		if e.pifSyncFails > 0 {
+			return now.Add(pifBackoff(e.pifSyncFails)) // an unwritable patch file is not retried every 30 minutes
+		}
 		return soon
 	}
 	switch s.State {
-	case "banned", "expired", "expiring":
+	case "banned", "expired", "expiring", "absent":
+		if !clockOK {
+			return later
+		}
 		if wait := e.pifSearchDue - e.uptime(); wait > 1800 {
 			return now.Add(time.Duration(wait * float64(time.Second)))
 		}
@@ -260,6 +289,9 @@ func (e *Engine) pifDeadline() time.Time {
 		if t, err := time.Parse("2006-01-02", s.Expires); err == nil {
 			if d := t.Add(-pol.RenewBefore); d.After(now) {
 				return d
+			}
+			if !clockOK {
+				return later
 			}
 			return soon
 		}

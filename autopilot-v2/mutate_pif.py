@@ -7,11 +7,11 @@ D = sys.argv[1].rstrip('/') + '/'
 FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go', 'reconcile.go', 'clock.go']
 ORIG = {f: open(D + f).read() for f in FILES}
 # The month-long simulations are slow (~35 s): only mutations of timing/backoff/denylist-state logic run them.
-LIFE = {'empty listing not known', 'denylist backoff flat', 'search backoff flat', 'contour not registered in the cycle', 'denylist replaced instead of merged'}
+LIFE = {'unverified clock polls every 30 min', 'failed listing marks the denylist known', 'empty listing not known', 'denylist backoff flat', 'search backoff flat', 'contour not registered in the cycle', 'denylist replaced instead of merged'}
 # Defense in depth: each of these guards is made redundant by another one, so removing either ALONE cannot change
 # behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
 EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|Clock|Deadline|EachMaintain'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing'
 
 M = [
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
@@ -43,6 +43,16 @@ M = [
     ("contour not registered in the cycle", 'reconcile.go', '	defer func() { e.pifMaintain(base, automatic) }()', '	defer func() { _ = base }()'),
     ("cycle does not reset the clock flag", 'reconcile.go', '	e.timeFresh = false\n	searchLock', '	searchLock'),
     ("checkTime does not mark freshness", 'clock.go', '	e.timeFresh = true\n', ''),
+    ("non-Canary fingerprints are managed", 'pif_engine.go', 'case perr == nil && !absent && f.Props["RELEASE"] != "CANARY":', 'case false:'),
+    ("JSON-fed module gets a competing .prop", 'pif_engine.go', 'case absent && e.pifJSONSource():', 'case false:'),
+    ("a missing file is never recreated", 'pif_install.go', 'state == "expiring" || state == "absent" ||', 'state == "expiring" ||'),
+    ("undated candidates accepted", 'pif_source.go', '	if candExp.IsZero() {\n		return false, "candidate_undated"', '	if false {\n		return false, "candidate_undated"'),
+    ("a busy lock is an ordinary error", 'reconcile.go', '		return errSearchBusy\n', '		return errors.New("search already running")\n'),
+    ("patch-sync wake never backs off", 'pif_engine.go', '			return now.Add(pifBackoff(e.pifSyncFails)) // an unwritable patch file is not retried every 30 minutes', '			return soon'),
+    ("unverified clock polls every 30 min", 'pif_engine.go', '		if !clockOK {\n			return later\n		}\n		if wait :=', '		if wait :='),
+    ("failed listing marks the denylist known", 'pif_source.go', '	if listed {\n		e.pifBannedKnown = true\n	}', '	e.pifBannedKnown = true'),
+    ("refresh has no own budget", 'pif_install.go', 'refreshCtx, stop := context.WithTimeout(ctx, pifRefreshBudget)', 'refreshCtx, stop := context.WithCancel(ctx)'),
+    ("sync failures not counted", 'pif_engine.go', '		e.pifSyncFails++\n		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()', '		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()'),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
 
