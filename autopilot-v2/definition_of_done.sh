@@ -59,6 +59,9 @@ else
     step "go test -race (with the month-long simulations)" sh -c "cd '$HERE' && go test -count=1 -race ./..."
 fi
 
+echo "== the shipped binary (Law 16, binary policy)"
+step "tracked box-autopilot is a reproducible build of the committed source" sh "$HERE/verify_binary.sh"
+
 echo "== shell"
 for sh_ in sh dash bash; do
     command -v "$sh_" >/dev/null 2>&1 || continue
@@ -67,7 +70,7 @@ for sh_ in sh dash bash; do
     step "test_action_pif.sh under $sh_" "$sh_" "$HERE/test_action_pif.sh"
 done
 if command -v shellcheck >/dev/null 2>&1; then
-    step "shellcheck" shellcheck -s sh webroot/common_scripts/doctor.sh webroot/common_scripts/autopilot.sh pif_policy.sh autopilot-v2/deploy_files.sh autopilot-v2/device_test.sh autopilot-v2/definition_of_done.sh
+    step "shellcheck" shellcheck -s sh webroot/common_scripts/doctor.sh webroot/common_scripts/autopilot.sh pif_policy.sh autopilot-v2/deploy_files.sh autopilot-v2/device_test.sh autopilot-v2/definition_of_done.sh autopilot-v2/build.sh autopilot-v2/verify_binary.sh
 else
     note "shellcheck not installed"
 fi
