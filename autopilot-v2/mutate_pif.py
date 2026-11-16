@@ -15,7 +15,7 @@ LIFE = {'unverified clock polls every 30 min', 'failed listing marks the denylis
 # behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
 M_RUNNER = {'user-chosen patch ignored by the boot script policy': 'policy', 'doctor fails a user-chosen patch': 'doctor'}
 EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted|Oversized|UnknownSource|RealCommandRunner|PolicyDefaults|ZeroPolicy|ColonFields|ImpossibleDate|EveryPIFEndpoint'
 
 M = [
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
