@@ -116,6 +116,11 @@ func (f pifFile) check() error {
 			return fmt.Errorf("FINGERPRINT disagrees with %s", names[i])
 		}
 	}
+	for _, k := range []string{"ID", "FINGERPRINT", "INCREMENTAL", "PRODUCT", "DEVICE"} {
+		if strings.Contains(f.Props[k], " ") { // a space shifts the fields the shell doctor reads
+			return fmt.Errorf("%s contains a space", k)
+		}
+	}
 	if !pifDate.MatchString(f.Props["SECURITY_PATCH"]) {
 		return errors.New("SECURITY_PATCH format")
 	}
@@ -173,10 +178,16 @@ func (f pifFile) releaseDate() time.Time {
 
 // expiry returns the best known end of life: the explicit comment, else release + lifetime.
 func (f pifFile) expiry(lifetime time.Duration) time.Time {
+	r := f.releaseDate()
 	if !f.Expires.IsZero() {
+		// A claimed end of life far beyond release + lifetime is not believed (a hostile or broken
+		// comment must not make a fingerprint look permanent).
+		if !r.IsZero() && f.Expires.After(r.Add(2*lifetime)) {
+			return r.Add(lifetime)
+		}
 		return f.Expires
 	}
-	if r := f.releaseDate(); !r.IsZero() {
+	if !r.IsZero() {
 		return r.Add(lifetime)
 	}
 	return time.Time{}
@@ -205,41 +216,62 @@ func normalizeDate(v string) (string, string) {
 	return "", ""
 }
 
-func parsePatchFile(b []byte) patchFile {
-	pf := patchFile{Kind: "none"}
-	if b == nil {
-		return pf
+// patchLine splits a security_patch.txt line into a trimmed key ("" for a bare value) and value.
+func patchLine(raw string) (key, val string, ok bool) {
+	s := strings.TrimSpace(strings.ReplaceAll(raw, "\r", ""))
+	if s == "" || strings.HasPrefix(s, "#") {
+		return "", "", false
 	}
-	pf.Kind = "unknown"
-	for _, raw := range strings.Split(strings.ReplaceAll(string(b), "\r", ""), "\n") {
-		s := strings.TrimSpace(raw)
-		if s == "" || strings.HasPrefix(s, "#") {
+	if eq := strings.IndexByte(s, '='); eq >= 0 {
+		return strings.TrimSpace(s[:eq]), strings.TrimSpace(s[eq+1:]), true
+	}
+	return "", s, true
+}
+
+// parsePatchFile reads the patch Tricky Store attests. Precedence is fixed and independent of line
+// order (the doctor's awk uses the same): all= > bare date > system=YYYYMM > stock (=prop); the last
+// line of a kind wins.
+func parsePatchFile(b []byte) patchFile {
+	if b == nil {
+		return patchFile{Kind: "none"}
+	}
+	var all, date, dateKind, sys string
+	stock := false
+	for _, raw := range strings.Split(string(b), "\n") {
+		key, val, ok := patchLine(raw)
+		if !ok {
 			continue
-		}
-		key, val := "", s
-		if eq := strings.IndexByte(s, '='); eq >= 0 {
-			key, val = s[:eq], strings.TrimSpace(s[eq+1:])
 		}
 		switch key {
 		case "":
-			if v, kind := normalizeDate(val); v != "" && pf.Kind != "all" {
-				pf = patchFile{Kind: kind, Value: v}
+			if v, kind := normalizeDate(val); v != "" {
+				date, dateKind = v, kind
 			}
 		case "all":
 			if v, _ := normalizeDate(val); v != "" {
-				pf = patchFile{Kind: "all", Value: v}
-			} else if val == "prop" && pf.Kind == "unknown" {
-				pf = patchFile{Kind: "stock"}
+				all = v
+			} else if val == "prop" {
+				stock = true
 			}
 		case "system":
-			if val == "prop" && pf.Kind == "unknown" {
-				pf = patchFile{Kind: "stock"}
-			} else if patchSix.MatchString(val) && pf.Kind == "unknown" {
-				pf = patchFile{Kind: "system", Value: val[:4] + "-" + val[4:]}
+			if val == "prop" {
+				stock = true
+			} else if patchSix.MatchString(val) {
+				sys = val[:4] + "-" + val[4:]
 			}
 		}
 	}
-	return pf
+	switch {
+	case all != "":
+		return patchFile{Kind: "all", Value: all}
+	case date != "":
+		return patchFile{Kind: dateKind, Value: date}
+	case sys != "":
+		return patchFile{Kind: "system", Value: sys}
+	case stock:
+		return patchFile{Kind: "stock"}
+	}
+	return patchFile{Kind: "unknown"}
 }
 
 // pair compares the Tricky Store patch with the PIF patch (invariant I-PATCH).
@@ -263,31 +295,27 @@ func (p patchFile) pair(pifPatch string) string {
 	return "mismatch"
 }
 
-// withPatch rewrites only the line that decides the patch, keeping every other line, or
-// creates "all=DATE" when there is no usable line. The result preserves the original format.
+// withPatch rewrites only the lines that decide the patch (every line of the winning kind), keeps
+// every other line, or creates "all=DATE" when there is no usable line. Each line keeps its own format.
 func (p patchFile) withPatch(orig []byte, pifPatch string) []byte {
-	if p.Kind == "none" || p.Kind == "unknown" || len(strings.TrimSpace(string(orig))) == 0 {
+	if p.Kind == "none" || p.Kind == "unknown" || p.Kind == "stock" || len(strings.TrimSpace(string(orig))) == 0 {
 		return []byte("all=" + pifPatch + "\n")
 	}
 	lines := strings.Split(strings.ReplaceAll(string(orig), "\r", ""), "\n")
 	replaced := false
 	for i, raw := range lines {
-		s := strings.TrimSpace(raw)
-		if s == "" || strings.HasPrefix(s, "#") {
+		key, val, ok := patchLine(raw)
+		if !ok {
 			continue
-		}
-		key, val := "", s
-		if eq := strings.IndexByte(s, '='); eq >= 0 {
-			key, val = s[:eq], strings.TrimSpace(s[eq+1:])
 		}
 		switch {
 		case p.Kind == "all" && key == "all":
-			if v, _ := normalizeDate(val); v == p.Value && !replaced {
+			if v, _ := normalizeDate(val); v != "" {
 				lines[i], replaced = "all="+pifPatch, true
 			}
 		case (p.Kind == "date" || p.Kind == "date8") && key == "":
-			if v, _ := normalizeDate(val); v == p.Value && !replaced {
-				if p.Kind == "date8" {
+			if v, kind := normalizeDate(val); v != "" {
+				if kind == "date8" {
 					lines[i] = strings.ReplaceAll(pifPatch, "-", "")
 				} else {
 					lines[i] = pifPatch
@@ -295,7 +323,7 @@ func (p patchFile) withPatch(orig []byte, pifPatch string) []byte {
 				replaced = true
 			}
 		case p.Kind == "system" && key == "system":
-			if patchSix.MatchString(val) && val[:4]+"-"+val[4:] == p.Value && !replaced {
+			if patchSix.MatchString(val) {
 				lines[i], replaced = "system="+strings.ReplaceAll(pifPatch[:7], "-", ""), true
 			}
 		}

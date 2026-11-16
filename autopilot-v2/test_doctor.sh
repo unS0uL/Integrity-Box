@@ -377,7 +377,7 @@ run_doctor pif_rel AP_TODAY=2026-11-16 AP_CONF="$W/pif_rel/brain/autopilot.conf"
 
 # 12e. Format errors: each must FAIL with its own reason.
 for pair in 'ID=ZP11.261016.008:ID=ZP11.260918.007:fingerprint_vs_ID' 'PRODUCT=bluejay_beta:PRODUCT=cubs_beta:fingerprint_vs_PRODUCT' \
-            'SECURITY_PATCH=2026-11-05:SECURITY_PATCH=2026-11:SECURITY_PATCH_format' 'MODEL=Pixel 6a:MODEL=:missing_MODEL'; do
+            'SECURITY_PATCH=2026-11-05:SECURITY_PATCH=2026-11:SECURITY_PATCH_invalid' 'MODEL=Pixel 6a:MODEL=:invalid_value_MODEL' 'MODEL=Pixel 6a:#MODEL=Pixel 6a:missing_MODEL'; do
     from=${pair%%:*}; rest=${pair#*:}; to=${rest%%:*}; why=${rest#*:}
     make_pif pif_bad "$(pif_text 2026-11-05 2026-12-20 | sed "s/^$from\$/$to/")
 " "all=2026-11-05

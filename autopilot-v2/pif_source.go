@@ -18,8 +18,8 @@ import (
 const (
 	pifArchiveBase = "https://github.com/MeowDump/Integrity-Box/releases/download/archive/"
 	pifReleaseAPI  = "https://api.github.com/repos/MeowDump/Integrity-Box/releases/tags/archive"
-	pifMaxBanned   = 8   // banned-* files read per refresh
-	pifMaxSet      = 128 // remembered denylist entries
+	pifMaxBanned   = 16  // banned-* files read per refresh
+	pifMaxSet      = 256 // remembered denylist entries
 )
 
 var (
@@ -37,7 +37,7 @@ func (e *Engine) loadBanned() {
 		return
 	}
 	e.pifBanned = map[string]bool{}
-	b, err := readLimited(e.pifBannedPath(), 32<<10)
+	b, err := readLimited(e.pifBannedPath(), 64<<10)
 	if err != nil {
 		return
 	}
@@ -50,10 +50,12 @@ func (e *Engine) loadBanned() {
 			e.pifBanned[v] = true
 		}
 	}
+	e.pifBannedKnown = true // a denylist read at least once earlier is remembered across reboots
 }
 
-// bannedNames lists banned-*.prop assets of the release; a failed listing falls back to the
-// names already known, so a network hiccup never forgets a ban.
+// bannedNames lists banned-*.prop assets of the release in the API's own (upload) order and keeps
+// the newest pifMaxBanned. A failed listing falls back to the one name known to exist; the bans
+// already remembered are never dropped (see refreshBanned), so a rate-limited API only delays news.
 func (e *Engine) bannedNames(ctx context.Context) []string {
 	body, err := e.get(ctx, pifReleaseAPI, 256<<10)
 	if err != nil {
@@ -68,14 +70,15 @@ func (e *Engine) bannedNames(ctx context.Context) []string {
 		return pifFallbackBanned
 	}
 	var names []string
+	seen := map[string]bool{}
 	for _, a := range rel.Assets {
-		if pifBannedName.MatchString(a.Name) {
+		if pifBannedName.MatchString(a.Name) && !seen[a.Name] {
+			seen[a.Name] = true
 			names = append(names, a.Name)
 		}
 	}
-	sort.Strings(names)
 	if len(names) > pifMaxBanned {
-		names = names[len(names)-pifMaxBanned:] // newest by name suffix is not guaranteed; keep a bounded tail
+		names = names[len(names)-pifMaxBanned:]
 	}
 	if len(names) == 0 {
 		return pifFallbackBanned
@@ -83,8 +86,9 @@ func (e *Engine) bannedNames(ctx context.Context) []string {
 	return names
 }
 
-// refreshBanned rebuilds the denylist from the source. The set is only replaced when at least one
-// file was read, and only persisted when it changed.
+// refreshBanned merges the maintainer's banned-*.prop files into the remembered denylist. A ban is a
+// fact about a build: it is never forgotten because a file could not be read this time. At least
+// one file must be readable, otherwise the refresh fails and the caller fails closed.
 func (e *Engine) refreshBanned(ctx context.Context) error {
 	e.loadBanned()
 	fresh := map[string]bool{}
@@ -102,64 +106,36 @@ func (e *Engine) refreshBanned(ctx context.Context) error {
 	if read == 0 {
 		return errors.New("no banned list readable")
 	}
-	if len(fresh) > pifMaxSet {
-		return errors.New("banned list too large")
+	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))
+	for k := range e.pifBanned {
+		merged[k] = true
 	}
-	same := len(fresh) == len(e.pifBanned)
 	for k := range fresh {
-		same = same && e.pifBanned[k]
+		merged[k] = true
 	}
-	if same {
+	if len(merged) > pifMaxSet {
+		// The memory is full of old bans: keep what the source lists now (older builds are long expired).
+		logEvent("pif_denylist_capped", "local", len(merged))
+		merged = fresh
+		if len(merged) > pifMaxSet {
+			return errors.New("banned list too large")
+		}
+	}
+	e.pifBannedKnown = true
+	changed := len(merged) != len(e.pifBanned)
+	for k := range merged {
+		changed = changed || !e.pifBanned[k]
+	}
+	if !changed {
 		return nil
 	}
-	e.pifBanned = fresh
-	list := make([]string, 0, len(fresh))
-	for k := range fresh {
+	e.pifBanned = merged
+	list := make([]string, 0, len(merged))
+	for k := range merged {
 		list = append(list, k)
 	}
 	sort.Strings(list)
 	return writeJSON(e.pifBannedPath(), list)
-}
-
-func (e *Engine) pifRejectedPath() string {
-	return filepath.Join(e.brain, ".autopilot-pif-rejected.json")
-}
-
-func pifIdentity(f pifFile) string {
-	return sha256Hex([]byte(f.Props["FINGERPRINT"] + "|" + f.patch()))
-}
-
-func (e *Engine) pifRejectedList() []string {
-	b, err := readLimited(e.pifRejectedPath(), 8192)
-	if err != nil {
-		return nil
-	}
-	var hashes []string
-	if json.Unmarshal(b, &hashes) != nil || len(hashes) > maxRejected {
-		return nil
-	}
-	return hashes
-}
-
-func (e *Engine) pifWasRejected(f pifFile) bool {
-	id := pifIdentity(f)
-	for _, h := range e.pifRejectedList() {
-		if h == id {
-			return true
-		}
-	}
-	return false
-}
-
-func (e *Engine) pifRemember(f pifFile) error {
-	if e.pifWasRejected(f) {
-		return nil
-	}
-	hashes := append(e.pifRejectedList(), pifIdentity(f))
-	if len(hashes) > maxRejected {
-		hashes = hashes[len(hashes)-maxRejected:]
-	}
-	return writeJSON(e.pifRejectedPath(), hashes)
 }
 
 // pifEligible decides whether cand may replace the installed fingerprint. Returns a reason when not.
@@ -167,17 +143,22 @@ func (e *Engine) pifEligible(cand, cur pifFile, curState string, now time.Time, 
 	switch {
 	case e.pifBanned[cand.Props["ID"]] || e.pifBanned[cand.Props["FINGERPRINT"]]:
 		return false, "candidate_banned"
-	case e.pifWasRejected(cand):
-		return false, "candidate_rejected_before"
 	case cur.Props["ID"] != "" && cand.Props["ID"] == cur.Props["ID"] && cand.Props["FINGERPRINT"] == cur.Props["FINGERPRINT"]:
 		return false, "same_build"
+	}
+	// The patch is not taken on trust: it must not lie in the future beyond the next monthly patch
+	// and must sit near the build date (canary-YYYYMM carries the YYYY-MM-05 patch).
+	if pt, err := time.Parse("2006-01-02", cand.patch()); err != nil || pt.After(now.AddDate(0, 0, 62)) {
+		return false, "candidate_patch_in_future"
+	} else if rel := cand.releaseDate(); !rel.IsZero() && (pt.Before(rel.AddDate(0, 0, -35)) || pt.After(rel.AddDate(0, 0, 125))) {
+		return false, "candidate_patch_far_from_build"
 	}
 	candExp := cand.expiry(pol.Lifetime)
 	if !candExp.IsZero() && !now.Before(candExp) {
 		return false, "candidate_expired"
 	}
 	switch curState {
-	case "banned", "expired", "absent":
+	case "banned", "expired":
 		return true, "" // anything valid beats a withdrawn or dead fingerprint
 	case "expiring", "ok":
 		if curState == "ok" && !pol.FollowLatest {
@@ -216,6 +197,8 @@ func (e *Engine) pifFindCandidate(ctx context.Context, cur pifFile, curState str
 			reason = src + "_unavailable"
 			continue
 		}
+		// Dates inside remote content are not believed: they are derived from the build id.
+		cand.Released, cand.Expires = time.Time{}, time.Time{}
 		ok, why := e.pifEligible(cand, cur, curState, time.Now(), pol)
 		if ok {
 			return &cand, ""

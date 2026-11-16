@@ -358,6 +358,7 @@ PIFPROP=${AP_PIF:-$MODULES/playintegrityfix/custom.pif.prop}
 PATCHFILE=${AP_PATCH:-$KDIR/security_patch.txt}
 
 # Prints one line: "OK|ERR reason id patch expiry released fingerprint" (unknown values are "-").
+# Rules are identical to the engine's parser (autopilot-v2/pif.go); pif_agreement_test.go keeps them so.
 pif_summary() {
     awk '
         function dn(s,   t, y, m, d) {
@@ -365,20 +366,33 @@ pif_summary() {
             if (m <= 2) { y--; m += 12 }
             return int(365.25 * y) + int(30.6001 * (m + 1)) + d
         }
+        function validdate(s,   t, y, m, d, dim) {
+            if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return 0
+            split(s, t, "-"); y = t[1] + 0; m = t[2] + 0; d = t[3] + 0
+            if (y < 2020 || y > 2100 || m < 1 || m > 12 || d < 1) return 0
+            dim = 31
+            if (m == 4 || m == 6 || m == 9 || m == 11) dim = 30
+            if (m == 2) dim = ((y % 4 == 0 && y % 100 != 0) || y % 400 == 0) ? 29 : 28
+            return d <= dim
+        }
         function bad(why) { print "ERR " why " - - - - -"; done = 1; exit }
+        function same(a, b) { return tolower(a) == tolower(b) }
         {
             line = $0; sub(/\r$/, "", line)
             if (line ~ /^[ \t]*# Configuration[ \t]*$/) inconf = 1
-            if (match(line, /^#[ \t]*Estimated Expiry:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) {
-                e = substr(line, RSTART, RLENGTH); sub(/^#[ \t]*Estimated Expiry:[ \t]*/, "", e); expiry = e; next
+            if (line ~ /^[ \t]*#[ \t]*Estimated Expiry:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]*$/) {
+                e = line; sub(/^[ \t]*#[ \t]*Estimated Expiry:[ \t]*/, "", e); sub(/[ \t]*$/, "", e); expiry = e; next
             }
-            if (match(line, /^#[ \t]*Canary Released:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) {
-                e = substr(line, RSTART, RLENGTH); sub(/^#[ \t]*Canary Released:[ \t]*/, "", e); released = e; next
+            if (line ~ /^[ \t]*#[ \t]*Canary Released:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9][ \t]*$/) {
+                e = line; sub(/^[ \t]*#[ \t]*Canary Released:[ \t]*/, "", e); sub(/[ \t]*$/, "", e); released = e; next
             }
             if (inconf) next
-            if (line ~ /^[ \t]*(#|$)/) next
+            sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") next
             eq = index(line, "="); if (eq == 0) next
-            k = substr(line, 1, eq - 1); v = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", v)
+            k = substr(line, 1, eq - 1); v = substr(line, eq + 1); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v)
+            if (k !~ /^[A-Z_][A-Z_]+$/ || length(k) > 40) bad("invalid_key")
+            if (v !~ /^[A-Za-z0-9 ._:\/+()-]+$/ || length(v) > 200) bad("invalid_value_" k)
             if (k in P) bad("duplicate_" k)
             P[k] = v
         }
@@ -387,16 +401,18 @@ pif_summary() {
             n = split("MANUFACTURER MODEL FINGERPRINT BRAND PRODUCT DEVICE RELEASE ID INCREMENTAL TYPE TAGS SECURITY_PATCH", req, " ")
             for (i = 1; i <= n; i++) if (P[req[i]] == "") bad("missing_" req[i])
             if (split(P["FINGERPRINT"], a, "/") != 6) bad("fingerprint_shape")
-            split(a[3], dr, ":"); split(a[5], it, ":")
-            if (tolower(a[1]) != tolower(P["BRAND"])) bad("fingerprint_vs_BRAND")
-            if (a[2] != P["PRODUCT"]) bad("fingerprint_vs_PRODUCT")
-            if (dr[1] != P["DEVICE"]) bad("fingerprint_vs_DEVICE")
-            if (dr[2] != P["RELEASE"]) bad("fingerprint_vs_RELEASE")
-            if (a[4] != P["ID"]) bad("fingerprint_vs_ID")
-            if (it[1] != P["INCREMENTAL"]) bad("fingerprint_vs_INCREMENTAL")
-            if (it[2] != P["TYPE"]) bad("fingerprint_vs_TYPE")
-            if (a[6] != P["TAGS"]) bad("fingerprint_vs_TAGS")
-            if (P["SECURITY_PATCH"] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) bad("SECURITY_PATCH_format")
+            if (split(a[3], dr, ":") != 2 || split(a[5], it, ":") != 2) bad("fingerprint_shape")
+            if (!same(a[1], P["BRAND"])) bad("fingerprint_vs_BRAND")
+            if (!same(a[2], P["PRODUCT"])) bad("fingerprint_vs_PRODUCT")
+            if (!same(dr[1], P["DEVICE"])) bad("fingerprint_vs_DEVICE")
+            if (!same(dr[2], P["RELEASE"])) bad("fingerprint_vs_RELEASE")
+            if (!same(a[4], P["ID"])) bad("fingerprint_vs_ID")
+            if (!same(it[1], P["INCREMENTAL"])) bad("fingerprint_vs_INCREMENTAL")
+            if (!same(it[2], P["TYPE"])) bad("fingerprint_vs_TYPE")
+            if (!same(a[6], P["TAGS"])) bad("fingerprint_vs_TAGS")
+            m = split("ID FINGERPRINT INCREMENTAL PRODUCT DEVICE", sp, " ")
+            for (i = 1; i <= m; i++) if (index(P[sp[i]], " ") > 0) bad(sp[i] "_has_space")
+            if (!validdate(P["SECURITY_PATCH"])) bad("SECURITY_PATCH_invalid")
             if (released == "" && match(P["ID"], /\.[0-9][0-9][0-9][0-9][0-9][0-9]\./)) {
                 x = substr(P["ID"], RSTART + 1, 6); released = "20" substr(x, 1, 2) "-" substr(x, 3, 2) "-" substr(x, 5, 2)
             }
@@ -404,17 +420,26 @@ pif_summary() {
         }' "$1"
 }
 
-# Prints "kind value": all|date|system|stock|none|unknown.
+# Prints "kind value": all|date|system|stock|none|unknown. Same precedence as the engine:
+# all= > bare date > system=YYYYMM > stock (=prop), the last line of a kind wins, key/value whitespace is ignored.
 patch_summary() {
     [ -f "$1" ] || { echo "none -"; return 0; }
     awk '
-        { line = $0; gsub(/[ \t\r]/, "", line)
-          if (line == "" || substr(line, 1, 1) == "#") next
-          if (line ~ /^all=[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) { all = substr(line, 5); next }
-          if (line ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) { date = line; next }
-          if (line ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/) { date = substr(line, 1, 4) "-" substr(line, 5, 2) "-" substr(line, 7, 2); next }
-          if (line ~ /^system=[0-9][0-9][0-9][0-9][0-9][0-9]$/) { sys = substr(line, 8, 4) "-" substr(line, 12, 2); next }
-          if (line == "system=prop" || line == "all=prop") stock = 1
+        function dash(v) { return substr(v, 1, 4) "-" substr(v, 5, 2) "-" substr(v, 7, 2) }
+        function isdate(v) { return v ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/ || v ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/ }
+        function norm(v) { return v ~ /^[0-9]+$/ ? dash(v) : v }
+        {
+            line = $0; sub(/\r$/, "", line); sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line)
+            if (line == "" || substr(line, 1, 1) == "#") next
+            eq = index(line, "=")
+            if (eq == 0) { if (isdate(line)) date = norm(line); next }
+            k = substr(line, 1, eq - 1); v = substr(line, eq + 1)
+            sub(/[ \t]+$/, "", k); sub(/^[ \t]+/, "", v)
+            if (k == "all") { if (isdate(v)) all = norm(v); else if (v == "prop") stock = 1 }
+            else if (k == "system") {
+                if (v == "prop") stock = 1
+                else if (v ~ /^[0-9][0-9][0-9][0-9][0-9][0-9]$/) sys = substr(v, 1, 4) "-" substr(v, 5, 2)
+            }
         }
         END {
             if (all != "") print "all " all
@@ -437,10 +462,15 @@ check_pif() {
         report WARN pif-format "custom.pif.prop missing (the module may use another fingerprint source)"
         return 0
     fi
-    # shellcheck disable=SC2046 # the helper prints space-separated fields on purpose
-    set -- $(pif_summary "$PIFPROP")
+    summary=$(pif_summary "$PIFPROP")
+    if [ -z "$summary" ]; then
+        report FAIL pif-format "the parser printed nothing"
+        return 0
+    fi
+    # shellcheck disable=SC2086 # the helper prints space-separated fields on purpose
+    set -- $summary
     if [ "$1" != OK ]; then
-        report FAIL pif-format "$2"
+        report FAIL pif-format "${2:-unknown_error}"
         return 0
     fi
     pid=$3 ppatch=$4 pexp=$5 prel=$6 pfp=$7
@@ -467,9 +497,10 @@ check_pif() {
             report OK pif-expiry "expires $pexp (in $left days)$est"
         fi
     fi
-    # shellcheck disable=SC2046 # the helper prints space-separated fields on purpose
-    set -- $(patch_summary "$PATCHFILE")
-    kind=$1 pval=$2
+    summary=$(patch_summary "$PATCHFILE")
+    # shellcheck disable=SC2086 # the helper prints space-separated fields on purpose
+    set -- $summary
+    kind=${1:-unknown} pval=${2:--}
     case "$kind" in
         none) report WARN patch-pair "security_patch.txt missing" ;;
         stock) report OK patch-pair "stock patch mode (system=prop): not spoofed on purpose" ;;

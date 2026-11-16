@@ -135,7 +135,7 @@ func TestMaintainFromGoogleWhenTheMaintainerIsSilent(t *testing.T) {
 	m.net.files = map[string]string{} // archive: everything 404
 	referer := googleNet(t, m)
 	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
-	m.e.pifBannedDue = 1e12
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
 	// installed product is cubs_beta: the API call asks for cubs_beta, which the fixture lacks -> google unavailable, file untouched
 	before := m.propText()
 	m.maintain(true)
@@ -149,7 +149,7 @@ func TestMaintainFromGoogleWhenTheMaintainerIsSilent(t *testing.T) {
 	m2.net.files = map[string]string{}
 	referer = googleNet(t, m2)
 	m2.e.pifBanned = map[string]bool{"ZP11.260821.010": true}
-	m2.e.pifBannedDue = 1e12
+	m2.e.pifBannedKnown, m2.e.pifBannedDue = true, 1e12
 	m2.maintain(true)
 	s := m2.e.status.PIF
 	if s.ID != "ZP11.261016.008" || s.Action != "installed" || s.PatchPair != "match" || s.Patch != "2026-11-05" {

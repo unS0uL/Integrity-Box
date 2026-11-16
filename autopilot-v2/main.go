@@ -39,7 +39,7 @@ func main() {
 		_ = json.NewEncoder(os.Stdout).Encode(h)
 		return
 	}
-	e := Engine{root: "/data/adb/tricky_store", ram: "/dev/.box_brain_v2", brain: "/data/adb/Box-Brain", requireConsumer: true}
+	e := Engine{root: "/data/adb/tricky_store", ram: "/dev/.box_brain_v2", brain: "/data/adb/Box-Brain", requireConsumer: true, strictContext: true}
 	if exe, er := os.Executable(); er == nil {
 		e.moduleRoot = filepath.Clean(filepath.Join(filepath.Dir(exe), "../../.."))
 	}

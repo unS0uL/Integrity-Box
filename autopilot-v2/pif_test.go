@@ -382,3 +382,24 @@ func TestReleaseDateFallsBackToBuildID(t *testing.T) {
 		t.Fatalf("2026-11-25 -> %s, want expiring (72h window)", s)
 	}
 }
+
+func TestPatchFilePrecedenceDoesNotDependOnLineOrder(t *testing.T) {
+	cases := []struct{ text, kind, value string }{
+		{"system=prop\nsystem=202611\n", "system", "2026-11"},
+		{"system=202611\nsystem=prop\n", "system", "2026-11"},
+		{"2026-10-05\nall=2026-11-05\n", "all", "2026-11-05"},
+		{"all=2026-11-05\n2026-10-05\n", "all", "2026-11-05"},
+		{"system=202610\n2026-11-05\n", "date", "2026-11-05"},
+		{"all=prop\nsystem=202611\n", "system", "2026-11"},
+		{"all=2026-10-05\nall=2026-11-05\n", "all", "2026-11-05"},
+		{"all=2026-11-05\nall=2026-10-05\n", "all", "2026-10-05"}, // the LAST line of a kind wins
+		{"all = 2026-11-05\n", "all", "2026-11-05"},               // whitespace around the key and the value is ignored
+		{"all\t=\t20261105\r\n", "all", "2026-11-05"},
+		{"vendor=2026-11-05\n", "unknown", ""},
+	}
+	for _, c := range cases {
+		if pf := parsePatchFile([]byte(c.text)); pf.Kind != c.kind || pf.Value != c.value {
+			t.Errorf("%q -> %+v, want %s %s", c.text, pf, c.kind, c.value)
+		}
+	}
+}

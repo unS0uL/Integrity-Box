@@ -32,6 +32,10 @@ type Engine struct {
 	searched                   bool
 	lastSearchBoot             float64
 	urgentEvidence             string
+	pifBannedKnown             bool                        // a denylist was read at least once (now or on an earlier boot)
+	pifFailures                int                         // consecutive failed installs (backoff)
+	scope                      string                      // prefix of per-host cooldown keys: the PIF contour must not cool down the keybox contour
+	strictContext              bool                        // fail instead of guessing when a replaced file's SELinux context cannot be read
 	pifBannedDue, pifSearchDue float64                     // uptime of the next denylist refresh / replacement search
 	restartGMS                 func(context.Context) error // test hook: restart Play Services
 	pifBanned                  map[string]bool             // denylisted fingerprint ids and strings (RAM, rebuilt from the source)

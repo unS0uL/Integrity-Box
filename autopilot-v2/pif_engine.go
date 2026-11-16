@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -169,8 +170,12 @@ func (e *Engine) writeMeta(path string, data []byte, defMode os.FileMode) error 
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 			uid, gid = int(sys.Uid), int(sys.Gid)
 		}
-		if c, cerr := fileContext(path); cerr == nil {
+		c, cerr := fileContext(path)
+		switch {
+		case cerr == nil:
 			context = c
+		case e.strictContext:
+			return errors.New("SELinux context of the file being replaced is unreadable")
 		}
 	} else if !os.IsNotExist(err) {
 		return err
@@ -234,4 +239,20 @@ func (e *Engine) pifDeadline() time.Time {
 		return time.Now().Add(30 * time.Minute)
 	}
 	return time.Time{}
+}
+
+// cleanStale removes temp files of an interrupted writeMeta (power loss between CreateTemp and rename).
+func cleanStale(dir string, age time.Duration) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	for _, en := range entries {
+		if !en.Type().IsRegular() || !strings.HasPrefix(en.Name(), ".autopilot-pif-") {
+			continue
+		}
+		if info, err := en.Info(); err == nil && time.Since(info.ModTime()) > age {
+			_ = os.Remove(filepath.Join(dir, en.Name()))
+		}
+	}
 }

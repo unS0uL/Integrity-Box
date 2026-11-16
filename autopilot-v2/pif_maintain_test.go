@@ -181,6 +181,10 @@ func TestMaintainNeverInstallsWhatItMustNot(t *testing.T) {
 	for _, c := range cases {
 		m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
 		c.mod(m)
+		if c.name == "source unreachable" { // the denylist is remembered from an earlier boot
+			m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+			m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+		}
 		before := m.propText()
 		m.maintain(true)
 		if m.propText() != before {
@@ -201,7 +205,7 @@ func TestEligibilityTable(t *testing.T) {
 	pol := defaultPIFPolicy()
 	oct := mustPIF(t, octoberPIF)   // expires 2026-11-17
 	nov := mustPIF(t, novemberMeow) // build id 2026-10-16 -> expires 2026-11-27
-	dead := mustPIF(t, strings.NewReplacer("ZP11.261016.008", "ZP11.250101.001").Replace(novemberMeow))
+	dead := mustPIF(t, strings.NewReplacer("ZP11.261016.008", "ZP11.250101.001", "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2025-02-05").Replace(novemberMeow))
 	cases := []struct {
 		name    string
 		cand    pifFile
@@ -214,7 +218,7 @@ func TestEligibilityTable(t *testing.T) {
 	}{
 		{"broken current accepts any valid candidate", nov, oct, "banned", false, nil, true, ""},
 		{"expired current accepts", nov, oct, "expired", false, nil, true, ""},
-		{"absent current accepts", nov, pifFile{Props: map[string]string{}}, "absent", false, nil, true, ""},
+		{"absent current is never created", nov, pifFile{Props: map[string]string{}}, "absent", false, nil, false, "state_absent"},
 		{"expiring current needs a strictly later expiry", nov, oct, "expiring", false, nil, true, ""},
 		{"equal expiry is not newer", oct, mustPIF(t, octoberPIF), "expiring", false, nil, false, "same_build"},
 		{"older candidate is not newer", oct, nov, "expiring", false, nil, false, "not_newer"},
@@ -232,14 +236,6 @@ func TestEligibilityTable(t *testing.T) {
 		if got != c.want || why != c.wantWhy {
 			t.Errorf("%s: got %v/%q want %v/%q", c.name, got, why, c.want, c.wantWhy)
 		}
-	}
-	// a fingerprint the maintainer's file lists is remembered after being rejected once
-	e.pifBanned = nil
-	if err := e.pifRemember(nov); err != nil {
-		t.Fatal(err)
-	}
-	if ok, why := e.pifEligible(nov, oct, "banned", now, pol); ok || why != "candidate_rejected_before" {
-		t.Fatalf("remembered rejection: %v %q", ok, why)
 	}
 }
 
@@ -373,6 +369,8 @@ const novemberMeowFingerprint = "google/bluejay_beta/bluejay:CANARY/ZP11.261016.
 
 func TestMaintainThrottlesSearchesAndBackoffsOnFailure(t *testing.T) {
 	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
 	m.net.down = true
 	m.maintain(true)
 	hits := m.net.hits[pifArchiveBase+"meow.prop"]
@@ -427,8 +425,13 @@ func TestRefreshBannedKeepsKnownBansWhenNothingIsReadable(t *testing.T) {
 	if err := m.e.refreshBanned(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	if !m.e.pifBanned["ZP11.111111.001"] || len(m.e.pifBanned) != 2 {
-		t.Fatalf("only the well-formed name must be read: %v", m.e.pifBanned)
+	if !m.e.pifBanned["ZP11.111111.001"] {
+		t.Fatalf("the well-formed name must be read: %v", m.e.pifBanned)
+	}
+	for _, bad := range []string{"../../etc/passwd", "banned-x.prop;rm", "banned-UPPER.prop"} {
+		if m.net.hits[pifArchiveBase+bad] != 0 {
+			t.Fatalf("hostile listing entry %q must never be requested", bad)
+		}
 	}
 	// corrupt persisted memory reads as empty and never blocks
 	if err := os.WriteFile(m.e.pifBannedPath(), []byte("{not json"), 0600); err != nil {
@@ -465,7 +468,7 @@ func TestMaintainKeepsConfigurationAndComments(t *testing.T) {
 func TestMaintainWaitsForVerifiedClockEvenForAKnownBan(t *testing.T) {
 	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
 	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
-	m.e.pifBannedDue = 1e12
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
 	m.e.status.TimeState = "unknown_or_disagrees"
 	before := m.propText()
 	m.maintain(true)
@@ -486,17 +489,26 @@ func TestMaintainWaitsForVerifiedClockEvenForAKnownBan(t *testing.T) {
 }
 
 // With the patch sync switched off, replacing the fingerprint would recreate the incident
-// (new PIF patch, old Tricky Store patch). The install must refuse and restore.
+// (new PIF patch, old Tricky Store patch). The install refuses BEFORE touching anything.
 func TestMaintainRefusesAnInstallThatWouldBreakThePatchPair(t *testing.T) {
 	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
 	m.e.policy.PIF.SyncPatch = false
 	before := m.propText()
+	st, _ := os.Stat(m.prop)
 	m.maintain(true)
-	if m.propText() != before {
-		t.Fatalf("the previous fingerprint must be restored:\n%s", m.propText())
+	st2, _ := os.Stat(m.prop)
+	if m.propText() != before || !st.ModTime().Equal(st2.ModTime()) {
+		t.Fatal("the fingerprint file must not even be rewritten")
 	}
-	if !strings.Contains(m.e.status.PIF.Reason, "still mismatched") || m.restart != 0 || m.patchText() != "all=2026-10-05\n" {
+	if !strings.Contains(m.e.status.PIF.Reason, "would leave the patch pair mismatched") || m.restart != 0 || m.patchText() != "all=2026-10-05\n" {
 		t.Fatalf("reason=%q restarts=%d patch=%q", m.e.status.PIF.Reason, m.restart, m.patchText())
+	}
+	// stock mode and a missing file are not "mismatched": the replacement is allowed there
+	m2 := newMaintain(t, octoberPIF, "system=prop\n")
+	m2.e.policy.PIF.SyncPatch = false
+	m2.maintain(true)
+	if m2.e.status.PIF.ID != "ZP11.261016.008" {
+		t.Fatalf("stock patch mode must not block a replacement: %+v", m2.e.status.PIF)
 	}
 }
 
@@ -505,5 +517,232 @@ func TestEligibilityRefusesAnInvalidCurrentFile(t *testing.T) {
 	nov := mustPIF(t, novemberMeow)
 	if ok, why := e.pifEligible(nov, pifFile{Props: map[string]string{}}, "invalid", time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC), defaultPIFPolicy()); ok || why != "state_invalid" {
 		t.Fatalf("a file the contour cannot parse is the user's: %v %q", ok, why)
+	}
+}
+
+// ---- fixes from the independent review ----
+
+func TestEligibilityDoesNotTrustThePatchOrDatesOfRemoteContent(t *testing.T) {
+	now := time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC)
+	e := &Engine{brain: t.TempDir(), pifBanned: map[string]bool{}}
+	pol := defaultPIFPolicy()
+	oct := mustPIF(t, octoberPIF)
+	cases := map[string]string{
+		"patch in 2099":                       strings.Replace(novemberMeow, "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2099-12-31", 1),
+		"patch 3 months ahead":                strings.Replace(novemberMeow, "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2027-02-05", 1),
+		"patch a year before the build":       strings.Replace(novemberMeow, "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2025-11-05", 1),
+		"patch 6 months after the build date": strings.Replace(novemberMeow, "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2027-04-05", 1),
+	}
+	for name, text := range cases {
+		ok, why := e.pifEligible(mustPIF(t, text), oct, "banned", now, pol)
+		if ok || !strings.HasPrefix(why, "candidate_patch") {
+			t.Errorf("%s: eligible=%v reason=%q", name, ok, why)
+		}
+	}
+	// the real maintainer file is fine
+	if ok, why := e.pifEligible(mustPIF(t, novemberMeow), oct, "banned", now, pol); !ok {
+		t.Fatalf("the real file must pass: %s", why)
+	}
+}
+
+// A hostile meow.prop that claims a 2099 expiry must not become a permanent fingerprint.
+func TestRemoteDatesAreIgnoredAndLocalClaimsClamped(t *testing.T) {
+	hostile := novemberMeow + "\n# Estimated Expiry: 2099-01-01\n# Canary Released: 2026-11-15\n"
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.net.files[pifArchiveBase+"meow.prop"] = hostile
+	m.maintain(true)
+	if !strings.Contains(m.propText(), "# Estimated Expiry: 2026-11-27") || strings.Contains(m.propText(), "2099") {
+		t.Fatalf("dates of remote content must be derived from the build id, not believed:\n%s", m.propText())
+	}
+	// the same claim in a LOCAL file is clamped to release + 2*lifetime
+	f := mustPIF(t, strings.Replace(octoberPIF, "Estimated Expiry: 2026-11-17", "Estimated Expiry: 2099-01-01", 1))
+	if got := f.expiry(42 * 24 * time.Hour).Format("2006-01-02"); got != "2026-11-18" { // release 2026-10-07 + 42d... clamped value
+		t.Fatalf("implausible local expiry must be clamped, got %s", got)
+	}
+}
+
+func TestDenylistIsMergedNeverShrunkAndFailsClosedWhenUnknown(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	// a previous successful refresh remembered an extra ban
+	m.e.loadBanned()
+	m.e.pifBanned["ZP11.111111.111"] = true
+	m.e.pifBannedKnown = true
+	// this time one of the files cannot be read: nothing may be forgotten
+	delete(m.net.files, pifArchiveBase+"banned-october-meow.prop")
+	m.net.listing = []string{"banned-october-meow.prop", "banned-extra.prop"}
+	m.net.files[pifArchiveBase+"banned-extra.prop"] = "ID=ZP11.222222.222\nFINGERPRINT=google/x/x:CANARY/ZP11.222222.222/2:user/release-keys\n"
+	if err := m.e.refreshBanned(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !m.e.pifBanned["ZP11.111111.111"] || !m.e.pifBanned["ZP11.222222.222"] {
+		t.Fatalf("a partial refresh must merge, not replace: %v", m.e.pifBanned)
+	}
+	// nothing known and nothing readable: no replacement is attempted at all
+	m2 := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m2.net.files = map[string]string{pifArchiveBase + "meow.prop": novemberMeow} // listing empty, banned files 404
+	m2.net.listing = nil
+	m2.e.pifBanned = map[string]bool{"ZP11.260918.007": true} // the current file is known banned from memory...
+	m2.e.pifBannedKnown = false                               // ...but the denylist was never read successfully
+	before := m2.propText()
+	m2.maintain(true)
+	if m2.propText() != before || !strings.Contains(m2.e.status.PIF.Reason, "denylist_unavailable") || m2.net.hits[pifArchiveBase+"meow.prop"] != 0 {
+		t.Fatalf("without a denylist nothing may be fetched or installed: %q", m2.e.status.PIF.Reason)
+	}
+}
+
+func TestDenylistListingKeepsTheNewestNamesInAPIOrder(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	var names []string
+	for i := 0; i < 20; i++ {
+		names = append(names, "banned-m"+string(rune('a'+i))+".prop")
+	}
+	m.net.listing = append([]string{"meow.prop"}, names...)
+	got := m.e.bannedNames(context.Background())
+	if len(got) != pifMaxBanned || got[len(got)-1] != "banned-mt.prop" || got[0] != "banned-me.prop" {
+		t.Fatalf("the newest %d names in upload order must be kept: %v", pifMaxBanned, got)
+	}
+}
+
+func TestDenylistCapKeepsWhatTheSourceListsNow(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	m.e.loadBanned()
+	for i := 0; i < pifMaxSet; i++ {
+		m.e.pifBanned["OLD."+strings.Repeat("0", 6)+string(rune('A'+i%26))+strings.Repeat("x", i%50)] = true
+	}
+	if err := m.e.refreshBanned(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if len(m.e.pifBanned) > pifMaxSet || !m.e.pifBanned["ZP11.260918.007"] {
+		t.Fatalf("size %d, current ban present=%v", len(m.e.pifBanned), m.e.pifBanned["ZP11.260918.007"])
+	}
+}
+
+func TestFailedInstallsBackOffExponentiallyAndRecover(t *testing.T) {
+	if got := []time.Duration{pifBackoff(1), pifBackoff(2), pifBackoff(3), pifBackoff(4), pifBackoff(5), pifBackoff(9)}; got[0] != 2*time.Hour || got[1] != 4*time.Hour ||
+		got[2] != 8*time.Hour || got[3] != 16*time.Hour || got[4] != 24*time.Hour || got[5] != 24*time.Hour {
+		t.Fatalf("backoff: %v", got)
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not stop root")
+	}
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	tsDir := filepath.Dir(m.patch)
+	if err := os.Chmod(tsDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	m.maintain(false)
+	m.maintain(false)
+	if m.e.pifFailures != 2 {
+		t.Fatalf("failures = %d, want 2", m.e.pifFailures)
+	}
+	if err := os.Chmod(tsDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	m.maintain(false)
+	if m.e.pifFailures != 0 || m.e.status.PIF.ID != "ZP11.261016.008" {
+		t.Fatalf("a success resets the counter: %d %+v", m.e.pifFailures, m.e.status.PIF)
+	}
+}
+
+func TestInstallKeepsEditsMadeDuringTheSearchAndAbortsOnAChangedFingerprint(t *testing.T) {
+	// the user edits the configuration section while the candidate is being fetched
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	inner := m.e.request
+	m.e.request = func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.String(), "/meow.prop") {
+			edited := strings.Replace(m.propText(), "spoofPhotos=1", "spoofPhotos=0\nmyOwnKey=7", 1)
+			_ = os.WriteFile(m.prop, []byte(edited), 0644)
+		}
+		return inner(r)
+	}
+	m.maintain(true)
+	if !strings.Contains(m.propText(), "myOwnKey=7") || !strings.Contains(m.propText(), "spoofPhotos=0") || m.e.status.PIF.ID != "ZP11.261016.008" {
+		t.Fatalf("the edit made during the search must survive:\n%s", m.propText())
+	}
+	// ... but if the FINGERPRINT itself was swapped under us, the decision is void
+	m2 := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	inner2 := m2.e.request
+	m2.e.request = func(r *http.Request) (*http.Response, error) {
+		if strings.HasSuffix(r.URL.String(), "/meow.prop") {
+			_ = os.WriteFile(m2.prop, []byte(novemberMeow), 0644)
+		}
+		return inner2(r)
+	}
+	m2.maintain(true)
+	if !strings.Contains(m2.e.status.PIF.Reason, "changed during the search") || m2.restart != 0 {
+		t.Fatalf("reason %q restarts %d", m2.e.status.PIF.Reason, m2.restart)
+	}
+}
+
+func TestPIFHTTPCooldownDoesNotCoolDownTheKeyboxContour(t *testing.T) {
+	e := &Engine{}
+	e.request = func(r *http.Request) (*http.Response, error) { return reply(429, nil), nil }
+	e.scope = pifScope
+	if _, err := e.get(context.Background(), pifArchiveBase+"meow.prop", 1024); err == nil {
+		t.Fatal("a 429 is an error")
+	}
+	if _, err := e.get(context.Background(), pifArchiveBase+"meow.prop", 1024); err == nil || err.Error() != "host cooldown" {
+		t.Fatalf("the same scope must be cooled down: %v", err)
+	}
+	e.scope = "" // the keybox contour fetching Megatron from the same host
+	e.request = func(r *http.Request) (*http.Response, error) { return reply(200, []byte("ok")), nil }
+	if b, err := e.get(context.Background(), pifArchiveBase+"Megatron", 1024); err != nil || string(b) != "ok" {
+		t.Fatalf("the key contour must not inherit the PIF cooldown: %v", err)
+	}
+}
+
+func TestPIFWorkHasItsOwnTimeBudgetAndScope(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	var deadline time.Time
+	var scopeSeen string
+	inner := m.e.request
+	m.e.request = func(r *http.Request) (*http.Response, error) {
+		deadline, _ = r.Context().Deadline()
+		scopeSeen = m.e.scope
+		return inner(r)
+	}
+	parent, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	m.e.pifMaintain(parent, true)
+	if deadline.IsZero() || time.Until(deadline) > pifBudget+time.Second {
+		t.Fatalf("PIF requests must carry a budget of at most %v, got %v", pifBudget, time.Until(deadline))
+	}
+	if scopeSeen != pifScope || m.e.scope != "" {
+		t.Fatalf("scope during=%q after=%q", scopeSeen, m.e.scope)
+	}
+}
+
+func TestStrictContextRefusesToGuessAndStaleTempFilesAreCleaned(t *testing.T) {
+	e, prop, _ := pifEngine(t, octoberPIF, "all=2026-10-05\n")
+	e.strictContext = true // on this host `ls -Zd` cannot read a context, exactly the failure being guarded
+	if err := e.writeMeta(prop, []byte("x"), 0644); err == nil {
+		if _, serr := fileContext(prop); serr != nil {
+			t.Fatal("an unreadable SELinux context must stop the replacement in strict mode")
+		}
+	}
+	if b, _ := os.ReadFile(prop); string(b) != octoberPIF {
+		t.Fatal("the file must be untouched after the refusal")
+	}
+	dir := filepath.Dir(prop)
+	old, fresh, other := filepath.Join(dir, ".autopilot-pif-old"), filepath.Join(dir, ".autopilot-pif-new"), filepath.Join(dir, ".autopilot-other")
+	for _, f := range []string{old, fresh, other} {
+		if err := os.WriteFile(f, []byte("x"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	twoHours := time.Now().Add(-2 * time.Hour)
+	for _, f := range []string{old, other} {
+		if err := os.Chtimes(f, twoHours, twoHours); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cleanStale(dir, time.Hour)
+	if _, err := os.Stat(old); err == nil {
+		t.Fatal("an old temp file of an interrupted write must be removed")
+	}
+	for _, f := range []string{fresh, other, prop} {
+		if _, err := os.Stat(f); err != nil {
+			t.Fatalf("%s must stay: %v", f, err)
+		}
 	}
 }

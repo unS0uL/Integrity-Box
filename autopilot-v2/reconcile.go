@@ -75,6 +75,7 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		e.status.Phase = "required_consumer_missing"
 		return errors.New("required keybox consumer is not installed")
 	}
+	base := ctx
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	if !e.dryRun {
@@ -84,7 +85,9 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		}
 	}
 	e.crl(ctx)
-	e.pifMaintain(ctx, automatic)
+	// The fingerprint contour runs when the key work is finished (whatever path returns) and has its
+	// own time budget and its own HTTP cooldown scope: it can neither starve nor cool down the key.
+	defer func() { e.pifMaintain(base, automatic) }()
 	h := e.status.Local
 	if h.State == "time_unknown" {
 		return errors.New("system clock unknown")

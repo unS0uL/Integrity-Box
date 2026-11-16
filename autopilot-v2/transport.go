@@ -55,7 +55,7 @@ func (e *Engine) getHeaders(ctx context.Context, address string, limit int64, ex
 	if e.hostNext == nil {
 		e.hostNext = map[string]time.Time{}
 	}
-	if time.Now().Before(e.hostNext[u.Hostname()]) {
+	if time.Now().Before(e.hostNext[e.scope+u.Hostname()]) {
 		return nil, errors.New("host cooldown")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -116,7 +116,7 @@ func (e *Engine) getHeaders(ctx context.Context, address string, limit int64, ex
 		if delay > 24*time.Hour {
 			delay = 24 * time.Hour
 		}
-		e.hostNext[u.Hostname()] = time.Now().Add(delay)
+		e.hostNext[e.scope+u.Hostname()] = time.Now().Add(delay)
 	}
 	if response.StatusCode != 200 {
 		logEvent("http_rejected", u.Hostname(), response.StatusCode)

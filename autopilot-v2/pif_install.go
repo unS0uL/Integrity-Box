@@ -26,23 +26,52 @@ spoofSignature=0
 spoofVendingSdk=0
 verboseLogs=0`
 
+const (
+	pifBudget       = 45 * time.Second // the whole fingerprint maintenance of one cycle
+	pifMaxBackoff   = 24 * time.Hour
+	pifStaleTmpAge  = time.Hour
+	pifScope        = "pif|" // HTTP cooldown scope of this contour
+	pifProbeDefault = 500 * time.Millisecond
+)
+
 // pifApplied matches the line Play Integrity Fork logs when it spoofs a process.
 var pifApplied = regexp.MustCompile(`PIF/Java:DG: \[FINGERPRINT\]: .* -> (.+?)\s*$`)
 
+// pifBackoff returns 2h, 4h, ... capped at 24h for n consecutive failures (n >= 1).
+func pifBackoff(n int) time.Duration {
+	d := 2 * time.Hour
+	for i := 1; i < n && d < pifMaxBackoff; i++ {
+		d *= 2
+	}
+	if d > pifMaxBackoff {
+		d = pifMaxBackoff
+	}
+	return d
+}
+
 // pifMaintain is the time-dependent half of the contour: refresh the denylist, audit with a
 // verified clock, repair the patch pair, and replace a withdrawn/expired/expiring fingerprint.
-// It never returns an error to the caller: the keybox contour must not depend on it.
-func (e *Engine) pifMaintain(ctx context.Context, automatic bool) {
+// It runs after the keybox work, with its own time budget and HTTP cooldown scope, and never
+// returns an error: the keybox contour must not depend on it.
+func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	if !e.pifActive() || e.dryRun {
 		return
 	}
+	ctx, cancel := context.WithTimeout(parent, pifBudget)
+	defer cancel()
+	e.scope = pifScope
+	defer func() { e.scope = "" }()
+
 	pol := e.pifPolicy()
 	timeOK := e.status.TimeState == "verified"
 	e.loadBanned()
+	cleanStale(filepath.Dir(e.pifPropPath()), pifStaleTmpAge)
+	cleanStale(e.root, pifStaleTmpAge)
 	if timeOK && (!automatic || e.uptime() >= e.pifBannedDue) {
 		wait := 6 * time.Hour
 		if err := e.refreshBanned(ctx); err != nil {
 			wait = 2 * time.Hour
+			logEvent("pif_denylist_error", "local", 0)
 		}
 		e.pifBannedDue = e.uptime() + wait.Seconds()
 	}
@@ -60,11 +89,18 @@ func (e *Engine) pifMaintain(ctx context.Context, automatic bool) {
 	if automatic && e.uptime() < e.pifSearchDue {
 		return
 	}
+	// Fail closed: without a denylist we cannot tell a good candidate from a withdrawn one.
+	if !e.pifBannedKnown {
+		e.pifSearchDue = e.uptime() + pifBackoff(1).Seconds()
+		e.status.PIF.Reason = "no_replacement:denylist_unavailable"
+		e.publish()
+		return
+	}
 	cand, why := e.pifFindCandidate(ctx, cur, state, pol)
 	if cand == nil {
 		wait := 6 * time.Hour
 		if strings.HasSuffix(why, "_unavailable") {
-			wait = 2 * time.Hour
+			wait = pifBackoff(1)
 		}
 		e.pifSearchDue = e.uptime() + wait.Seconds()
 		e.status.PIF.Reason = "no_replacement:" + why
@@ -73,9 +109,12 @@ func (e *Engine) pifMaintain(ctx context.Context, automatic bool) {
 		return
 	}
 	if err := e.pifInstall(ctx, *cand, cur); err != nil {
-		e.pifSearchDue = e.uptime() + (2 * time.Hour).Seconds()
+		e.pifFailures++
+		e.pifSearchDue = e.uptime() + pifBackoff(e.pifFailures).Seconds()
 		e.status.PIF.Reason = "install_failed: " + err.Error()
-		logEvent("pif_install_failed", "local", 0)
+		logEvent("pif_install_failed", "local", e.pifFailures)
+	} else {
+		e.pifFailures = 0
 	}
 	e.publish()
 }
@@ -83,7 +122,8 @@ func (e *Engine) pifMaintain(ctx context.Context, automatic bool) {
 // pifInstall writes the candidate, proves the write by reading it back, repairs the patch pair,
 // then asks Play Services to restart and looks for the spoof in the log. Nothing is kept on
 // disk as a backup (rule: no copies on the phone); the previous bytes live in memory only until
-// the install is settled.
+// the install is settled. Every failure after the write restores the previous file AND realigns
+// the patch with it.
 func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	pol := e.pifPolicy()
 	wl, err := lock(filepath.Join(e.ram, "write.lock"))
@@ -96,36 +136,57 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	if err != nil {
 		return err
 	}
+	// The file may have been edited (WebUI, user) since the audit: work from what is on disk now,
+	// and give up if it is no longer the file the decision was made for.
 	tail := pifDefaultTail
-	if cur.Tail != "" {
-		tail = cur.Tail
+	if !absent {
+		now, perr := parsePIF(orig)
+		if perr != nil || now.Props["FINGERPRINT"] != cur.Props["FINGERPRINT"] || now.patch() != cur.patch() {
+			return errors.New("the fingerprint file changed during the search; try again next cycle")
+		}
+		if now.Tail != "" {
+			tail = now.Tail
+		}
+	}
+	// Refuse BEFORE touching anything when the pair could not be made consistent: replacing the
+	// fingerprint without the matching patch recreates the incident of 2026-11-16.
+	pb, pAbsent, perr := readOptional(e.patchPath(), 4096)
+	if perr != nil {
+		return errors.New("security_patch.txt unreadable: " + perr.Error())
+	}
+	pf := patchFile{Kind: "none"}
+	if !pAbsent {
+		pf = parsePatchFile(pb)
+	}
+	if !pol.SyncPatch && pf.Kind != "stock" && pf.Kind != "none" && pf.pair(cand.patch()) != "match" {
+		return errors.New("would leave the patch pair mismatched while pif_sync_patch is off")
 	}
 	data := cand.render(tail, cand.releaseDate(), cand.expiry(pol.Lifetime), time.Now().Format("2006-01-02"))
 	if _, err = parsePIF(data); err != nil {
 		return errors.New("rendered file invalid: " + err.Error())
 	}
-	restore := func() {
+	restoreAll := func() {
 		if !absent {
 			_ = e.writeMeta(prop, orig, 0644)
 		}
+		f, p := e.pifAudit(true)
+		_ = e.pifSyncPatch(f, p) // realign the patch with the file that is on disk again
 	}
 	if err = e.writeMeta(prop, data, 0644); err != nil {
 		return err
 	}
 	back, _, err := readOptional(prop, pifMaxBytes)
 	if err != nil || !bytes.Equal(back, data) {
-		restore()
+		restoreAll()
 		return errors.New("readback differs; previous file restored")
 	}
-	f, pf := e.pifAudit(true)
-	if err = e.pifSyncPatch(f, pf); err != nil {
-		restore()
-		e.pifAudit(true)
+	f, p := e.pifAudit(true)
+	if err = e.pifSyncPatch(f, p); err != nil {
+		restoreAll()
 		return errors.New("patch pair repair failed; previous file restored: " + err.Error())
 	}
 	if e.status.PIF.PatchPair == "mismatch" {
-		restore()
-		e.pifAudit(true)
+		restoreAll()
 		return errors.New("patch pair still mismatched; previous file restored")
 	}
 	applied, evidence := e.pifProbe(ctx, cand)
@@ -163,7 +224,7 @@ func (e *Engine) pifProbe(ctx context.Context, cand pifFile) (string, string) {
 	_ = e.restartPlayServices(ctx)
 	poll := e.probePoll
 	if poll <= 0 {
-		poll = 500 * time.Millisecond
+		poll = pifProbeDefault
 	}
 	deadline := time.Now().Add(pol.ProbeWait)
 	evidence := "marker_not_visible"
