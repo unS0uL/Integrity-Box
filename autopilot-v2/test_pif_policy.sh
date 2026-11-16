@@ -89,6 +89,18 @@ printf 'pif_mode = auto\npif_sync_patch = on\ncandidate_budget = 3\n' > "$W/poli
 boot policy_ok
 expect_patch policy_ok "all=2026-11-05"
 
+# 4b. a date the user set on purpose in the Patch page of the WebUI (Custom-Patch/<date>) is never overwritten at boot
+make_box custom 2026-11-05 "all=2026-09-01
+"
+mkdir -p "$W/custom/data/adb/Box-Brain/Custom-Patch" && : > "$W/custom/data/adb/Box-Brain/Custom-Patch/2026-09-01"
+boot custom
+expect_patch custom "all=2026-09-01"
+make_box emptycustom 2026-11-05 "all=2026-09-01
+"
+mkdir -p "$W/emptycustom/data/adb/Box-Brain/Custom-Patch"      # an empty directory records no choice
+boot emptycustom
+expect_patch emptycustom "all=2026-11-05"
+
 # 5. NO LITERAL FALLBACK: an unusable fingerprint patch leaves everything as it is
 for pifpatch in - garbage 2026-13-45x 2026-11; do
     make_box nopatch "$pifpatch" "all=2026-09-09

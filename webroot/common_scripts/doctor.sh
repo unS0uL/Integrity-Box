@@ -508,11 +508,18 @@ check_pif() {
         system)
             case "$ppatch" in
                 "$pval"-*) report OK patch-pair "month $pval matches PIF patch $ppatch" ;;
-                *) report FAIL patch-pair "Tricky Store patch month $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)" ;;
+                *)
+                    if [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then
+                        report WARN patch-pair "custom patch month $pval (set in the Patch page) differs from PIF patch $ppatch: kept as chosen"
+                    else
+                        report FAIL patch-pair "Tricky Store patch month $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)"
+                    fi ;;
             esac ;;
         *)
             if [ "$pval" = "$ppatch" ]; then
                 report OK patch-pair "Tricky Store patch equals PIF patch $ppatch"
+            elif [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then
+                report WARN patch-pair "custom patch $pval (set in the Patch page) differs from PIF patch $ppatch: kept as chosen, DEVICE integrity may fail"
             else
                 report FAIL patch-pair "Tricky Store patch $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)"
             fi ;;

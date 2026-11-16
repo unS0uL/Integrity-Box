@@ -19,7 +19,7 @@ type PIFStatus struct {
 	Fingerprint string    `json:"fingerprint,omitempty"`
 	Patch       string    `json:"patch,omitempty"`
 	PatchFile   string    `json:"patch_file,omitempty"`
-	PatchPair   string    `json:"patch_pair"` // match|mismatch|stock|missing|unknown|n/a
+	PatchPair   string    `json:"patch_pair"` // match|mismatch|override|stock|missing|unknown|n/a
 	Released    string    `json:"released,omitempty"`
 	Expires     string    `json:"expires,omitempty"`
 	Applied     string    `json:"applied"` // accepted|rejected|unknown|not_probed
@@ -34,6 +34,13 @@ func (e *Engine) now() time.Time {
 		return e.clock()
 	}
 	return time.Now()
+}
+
+// customPatchMarker: the Patch page of the WebUI records an explicit user choice as a file
+// Box-Brain/Custom-Patch/<date> next to the security_patch.txt it writes.
+func (e *Engine) customPatchMarker() bool {
+	entries, err := os.ReadDir(filepath.Join(e.brain, "Custom-Patch"))
+	return err == nil && len(entries) > 0
 }
 
 // pifJSONSource reports whether the module is fed by a JSON fingerprint instead of custom.pif.prop.
@@ -141,6 +148,9 @@ func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
 		}
 		st.PatchFile = pf.Value
 		st.PatchPair = pf.pair(f.patch())
+		if st.PatchPair == "mismatch" && e.customPatchMarker() {
+			st.PatchPair = "override" // the user chose this date in the Patch page: their decision wins, doctor warns
+		}
 	}
 	return f, pf
 }

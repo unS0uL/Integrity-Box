@@ -400,6 +400,20 @@ run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; cont
 : > "$W/log.txt"
 run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; contains "$OUT" "no fingerprint spoof line"
 
+# 12f2. A patch the user chose in the Patch page: WARN (kept as chosen), not FAIL; without the marker it is the FAIL of 12b.
+make_pif pif_custom "$(pif_text 2026-11-05 2026-12-20)
+" "all=2026-09-01
+"
+mkdir -p "$W/pif_custom/brain/Custom-Patch"                       # an EMPTY directory records no choice
+run_doctor pif_custom AP_TODAY=2026-11-16
+contains "$OUT" "FAIL patch-pair"
+: > "$W/pif_custom/brain/Custom-Patch/2026-09-01"                  # the marker the Patch page leaves
+run_doctor pif_custom AP_TODAY=2026-11-16
+contains "$OUT" "WARN patch-pair"; contains "$OUT" "kept as chosen"; lacks "$OUT" "FAIL patch-pair"
+rm -f "$W/pif_custom/brain/Custom-Patch/2026-09-01"
+run_doctor pif_custom AP_TODAY=2026-11-16
+contains "$OUT" "FAIL patch-pair"        # the directory is empty again: no recorded choice
+
 # 12g. Without the module the checks are silent (no new noise for plain Tricky Store setups); read-only.
 run_doctor good AP_TODAY=2026-11-16; lacks "$OUT" "pif-"; lacks "$OUT" "patch-pair"
 b1=$(cksum < "$W/pif_incident/modules/playintegrityfix/custom.pif.prop"); b2=$(cksum < "$W/pif_incident/tricky_store/security_patch.txt")

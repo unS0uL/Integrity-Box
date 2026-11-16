@@ -1267,3 +1267,31 @@ func TestListingDownWithAReadableFallbackFileIsAFailureAndNotKnown(t *testing.T)
 		t.Fatalf("failures = %d, want 1", m.e.pifBannedFails)
 	}
 }
+
+// A date the user set on purpose in the Patch page of the WebUI (marker Box-Brain/Custom-Patch/<date>) is
+// never "repaired" by the contour; the status says override and nothing wakes the daemon about it.
+func TestUserChosenCustomPatchIsAnOverrideNotAMismatch(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-09-01\n")
+	m.e.status.TimeState = "verified"
+	custom := filepath.Join(m.e.brain, "Custom-Patch")
+	if err := os.MkdirAll(custom, 0700); err != nil {
+		t.Fatal(err)
+	}
+	// directory present but EMPTY: no choice was recorded, the pair is simply wrong and gets repaired
+	if f, p := m.e.pifAudit(true); m.e.status.PIF.PatchPair != "mismatch" || m.e.pifSyncPatch(f, p) != nil || m.patchText() != "all=2026-11-05\n" {
+		t.Fatalf("an empty marker directory must not block the repair: %+v %q", m.e.status.PIF, m.patchText())
+	}
+	if err := os.WriteFile(m.patch, []byte("all=2026-09-01\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(custom, "2026-09-01"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	m.maintain(true)
+	if m.e.status.PIF.PatchPair != "override" || m.patchText() != "all=2026-09-01\n" {
+		t.Fatalf("the user's date must survive: pair=%s file=%q", m.e.status.PIF.PatchPair, m.patchText())
+	}
+	if d := m.e.pifDeadline(); !d.IsZero() && d.Sub(m.e.now()) < time.Hour {
+		t.Fatalf("an override must not wake the daemon: %v", d.Sub(m.e.now()))
+	}
+}

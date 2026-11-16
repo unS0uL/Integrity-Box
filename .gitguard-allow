@@ -1,0 +1,6 @@
+# Paths that are MEANT to be tracked although they are binary or large (git-guard, Law 16)
+webroot/common_scripts/bin/*
+*.png
+*.jpg
+*.apk
+*.zip
