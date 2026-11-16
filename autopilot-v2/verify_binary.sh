@@ -22,7 +22,7 @@ actual=$(shasum -a 256 "$BIN" | cut -d' ' -f1)
 T=$(mktemp -d)
 trap 'rm -rf "$T"' EXIT INT TERM
 git -C "$ROOT" archive HEAD autopilot-v2 | tar -x -C "$T"
-( cd "$T/autopilot-v2" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o "$T/rebuilt" . )
+( cd "$T/autopilot-v2" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags='-s -w' -o "$T/rebuilt" . )
 rebuilt=$(shasum -a 256 "$T/rebuilt" | cut -d' ' -f1)
 if [ "$rebuilt" = "$actual" ]; then
     echo "PASS: the tracked binary is a reproducible build of the committed source ($(printf %s "$actual" | cut -c1-12))"
