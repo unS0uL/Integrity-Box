@@ -208,7 +208,7 @@ func (e *Engine) pifFindCandidate(ctx context.Context, cur pifFile, curState str
 				cand, err = parsePIF(body)
 			}
 		case "google":
-			cand, err = e.pifGoogleCandidate(ctx, pol)
+			cand, err = e.pifGoogleCandidate(ctx, cur)
 		default:
 			continue
 		}
@@ -223,8 +223,4 @@ func (e *Engine) pifFindCandidate(ctx context.Context, cur pifFile, curState str
 		reason = src + ":" + why
 	}
 	return nil, reason
-}
-
-func (e *Engine) pifGoogleCandidate(ctx context.Context, pol PIFPolicy) (pifFile, error) {
-	return pifFile{}, errors.New("google source not available")
 }

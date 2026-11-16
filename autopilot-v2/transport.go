@@ -16,7 +16,7 @@ import (
 )
 
 func allowedHost(host string) bool {
-	return host == "rawbin.dpejoh.com" || host == "github.com" || host == "release-assets.githubusercontent.com" || host == "objects.githubusercontent.com" || host == "android.googleapis.com" || host == "api.github.com" || extraAllowedHosts[host]
+	return host == "rawbin.dpejoh.com" || host == "github.com" || host == "release-assets.githubusercontent.com" || host == "objects.githubusercontent.com" || host == "android.googleapis.com" || host == "api.github.com" || host == "flash.android.com" || host == "content-flashstation-pa.googleapis.com" || extraAllowedHosts[host]
 }
 
 func cacheTTL(header string) time.Duration {
@@ -43,6 +43,11 @@ type cacheEntry struct {
 }
 
 func (e *Engine) get(ctx context.Context, address string, limit int64) ([]byte, error) {
+	return e.getHeaders(ctx, address, limit, nil)
+}
+
+// getHeaders is get with extra request headers (never credentials: the Flash Tool API wants a Referer).
+func (e *Engine) getHeaders(ctx context.Context, address string, limit int64, extra http.Header) ([]byte, error) {
 	u, err := url.Parse(address)
 	if err != nil || u.Scheme != "https" || !allowedHost(u.Hostname()) || u.User != nil || u.Port() != "" && u.Port() != "443" {
 		return nil, errors.New("URL policy")
@@ -56,6 +61,9 @@ func (e *Engine) get(ctx context.Context, address string, limit int64) ([]byte, 
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	headers := http.Header{}
+	for k, v := range extra {
+		headers[k] = v
+	}
 	cached := e.cache[address]
 	if cached.ETag != "" {
 		headers.Set("If-None-Match", cached.ETag)
