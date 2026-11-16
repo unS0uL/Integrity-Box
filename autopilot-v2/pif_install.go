@@ -204,13 +204,37 @@ func (e *Engine) pifRestore(prop string, orig []byte, absent bool) {
 	_ = e.pifSyncPatch(f, p)
 }
 
+const (
+	pifDroidGuard     = "com.google.android.gms/.droidguard.DroidGuardService"
+	pifDroidGuardPing = "com.google.android.gms.droidguard.service.PING"
+)
+
+// pifRespawnDelay lets the killed process die before the next one is requested.
+var pifRespawnDelay = 500 * time.Millisecond
+
+// restartPlayServices makes Play Services run DroidGuard again with the new fingerprint: kill the
+// DroidGuard process, then ask Android to start its service so the process comes back NOW (a plain
+// kill, which killpi.sh and Integrity Box's restart_google_services do, leaves it dead until some
+// app happens to use DroidGuard, so nothing is spoofed or logged for a long time). The PING intent
+// is the one DroidGuardService itself declares. One `am` call = one JVM start: acceptable, it runs
+// only when a fingerprint was actually installed.
 func (e *Engine) restartPlayServices(ctx context.Context) error {
 	if e.restartGMS != nil {
 		return e.restartGMS(ctx)
 	}
-	// killall exits non-zero when the process is not running, which is fine: it starts on demand.
-	_ = exec.CommandContext(ctx, "killall", "com.google.android.gms.unstable").Run()
-	return nil
+	run := e.runCommand
+	if run == nil {
+		run = func(ctx context.Context, name string, args ...string) error {
+			return exec.CommandContext(ctx, name, args...).Run()
+		}
+	}
+	_ = run(ctx, "killall", "com.google.android.gms.unstable") // non-zero when it was not running: fine
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(pifRespawnDelay):
+	}
+	return run(ctx, "am", "startservice", "-n", pifDroidGuard, "-a", pifDroidGuardPing)
 }
 
 // pifProbe restarts Play Services and looks, after a marker with a random code, for the line in

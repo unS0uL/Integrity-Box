@@ -806,3 +806,33 @@ func TestInstallDetectsAWriteThatStoredSomethingElse(t *testing.T) {
 		t.Fatalf("reason=%q restarts=%d failures=%d", m.e.status.PIF.Reason, m.restart, m.e.pifFailures)
 	}
 }
+
+func TestPlayServicesRestartKillsThenRespawnsDroidGuard(t *testing.T) {
+	old := pifRespawnDelay
+	pifRespawnDelay = 0
+	defer func() { pifRespawnDelay = old }()
+	var calls []string
+	e := &Engine{runCommand: func(_ context.Context, name string, args ...string) error {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		if name == "killall" {
+			return os.ErrNotExist // "no such process" must not stop the respawn
+		}
+		return nil
+	}}
+	if err := e.restartPlayServices(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"killall com.google.android.gms.unstable",
+		"am startservice -n com.google.android.gms/.droidguard.DroidGuardService -a com.google.android.gms.droidguard.service.PING"}
+	if strings.Join(calls, "|") != strings.Join(want, "|") {
+		t.Fatalf("commands %q, want %q", calls, want)
+	}
+	// a cancelled context stops before the respawn request
+	pifRespawnDelay = time.Hour
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	calls = nil
+	if err := e.restartPlayServices(ctx); err == nil || len(calls) != 1 {
+		t.Fatalf("cancelled restart: err=%v calls=%q", err, calls)
+	}
+}

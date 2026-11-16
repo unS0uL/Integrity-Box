@@ -6,7 +6,7 @@ import sys
 D = sys.argv[1].rstrip('/') + '/'
 FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go']
 ORIG = {f: open(D + f).read() for f in FILES}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects'
 
 M = [
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
@@ -18,7 +18,7 @@ M = [
     ("stale tail used", 'pif_install.go', '		if now.Tail != "" {\n			tail = now.Tail\n		}', '		if cur.Tail != "" {\n			tail = cur.Tail\n		}'),
     ("changed-during-search guard removed", 'pif_install.go', 'if perr != nil || now.Props["FINGERPRINT"] != cur.Props["FINGERPRINT"] || now.patch() != cur.patch() {', 'if perr != nil {'),
     ("early refusal removed", 'pif_install.go', 'if !pol.SyncPatch && pf.Kind != "stock" && pf.Kind != "none" && pf.pair(cand.patch()) != "match" {', 'if false && pf.Kind != "" {'),
-    ("restore does not realign patch", 'pif_install.go', '	_ = e.pifSyncPatch(f, p)\n}\n\nfunc (e *Engine) restartPlayServices', '	_, _ = f, p\n}\n\nfunc (e *Engine) restartPlayServices'),
+    ("restore does not realign patch", 'pif_install.go', '	f, p := e.pifAudit(true)\n	_ = e.pifSyncPatch(f, p)\n}\n\nconst (', '	f, p := e.pifAudit(true)\n	_, _ = f, p\n}\n\nconst ('),
     ("pif scope not set", 'pif_install.go', '	e.scope = pifScope', '	e.scope = ""'),
     ("strict context ignored", 'pif_engine.go', 'case e.strictContext:', 'case false:'),
     ("budget removed", 'pif_install.go', 'ctx, cancel := context.WithTimeout(parent, pifBudget)', 'ctx, cancel := context.WithCancel(parent)'),
@@ -28,6 +28,8 @@ M = [
     ("scoped cooldown not scoped", 'transport.go', 'e.hostNext[e.scope+u.Hostname()] = time.Now().Add(delay)', 'e.hostNext[u.Hostname()] = time.Now().Add(delay)'),
     ("write lock skipped", 'pif_install.go', '	wl, err := lock(filepath.Join(e.ram, "write.lock"))\n	if err != nil {\n		return errors.New("write lock busy")\n	}\n	defer wl.Close()', '	var err error'),
     ("probe restart skipped", 'pif_install.go', '	_ = e.restartPlayServices(ctx)', '	_ = ctx'),
+    ("respawn request skipped", 'pif_install.go', '	return run(ctx, "am", "startservice", "-n", pifDroidGuard, "-a", pifDroidGuardPing)', '	return nil'),
+    ("respawn uses a different intent", 'pif_install.go', 'pifDroidGuardPing = "com.google.android.gms.droidguard.service.PING"', 'pifDroidGuardPing = "com.google.android.gms.droidguard.service.NOPE"'),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
 

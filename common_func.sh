@@ -784,6 +784,14 @@ restart_google_services() {
   done
 
   echo " ✦ Killed Google Service Processes"
+
+  # A kill alone leaves DroidGuard dead until some app uses it (no fingerprint is spoofed or logged
+  # meanwhile): ask Android to start its service again right away.
+  if command -v am >/dev/null 2>&1; then
+    sleep 1
+    am startservice -n com.google.android.gms/.droidguard.DroidGuardService \
+      -a com.google.android.gms.droidguard.service.PING >/dev/null 2>&1 || true
+  fi
 }
 
 hide_recovery_folders() {
