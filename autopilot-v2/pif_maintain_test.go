@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +46,7 @@ type netFake struct {
 	files   map[string]string // URL -> body (200); absent URL -> 404
 	listing []string          // asset names for the release API
 	apiDown bool              // the release listing answers 500 while the files stay readable
+	apiBody string            // when set: the listing answers 200 with exactly this body
 	down    bool
 	hits    map[string]int
 }
@@ -59,6 +62,9 @@ func (n *netFake) do(r *http.Request) (*http.Response, error) {
 	}
 	if u == pifReleaseAPI && n.apiDown {
 		return reply(500, nil), nil
+	}
+	if u == pifReleaseAPI && n.apiBody != "" {
+		return reply(200, []byte(n.apiBody)), nil
 	}
 	if u == pifReleaseAPI {
 		type asset struct {
@@ -1293,5 +1299,248 @@ func TestUserChosenCustomPatchIsAnOverrideNotAMismatch(t *testing.T) {
 	}
 	if d := m.e.pifDeadline(); !d.IsZero() && d.Sub(m.e.now()) < time.Hour {
 		t.Fatalf("an override must not wake the daemon: %v", d.Sub(m.e.now()))
+	}
+}
+
+// ---- coverage review: paths that no test executed ----
+
+type failingLog struct{}
+
+func (failingLog) Mark(context.Context, string) error      { return errors.New("no logger") }
+func (failingLog) Lines(context.Context) ([]string, error) { return nil, errors.New("no logcat") }
+
+// THE property the fail-closed gate relies on: after a daemon restart the denylist is read back from disk and the
+// contour knows it (no network needed). Entries that are not plain tokens are dropped, a corrupt file reads as unknown.
+func TestDenylistIsRestoredFromDiskAfterARestart(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	if err := m.e.refreshBanned(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &Engine{brain: m.e.brain} // a new process: empty memory
+	fresh.loadBanned()
+	if !fresh.pifBannedKnown || !fresh.pifBanned["ZP11.260918.007"] {
+		t.Fatalf("the persisted denylist must be restored and known: known=%v %v", fresh.pifBannedKnown, fresh.pifBanned)
+	}
+	if err := os.WriteFile(fresh.pifBannedPath(), []byte(`["ZP11.1.1","$(rm -rf /)","a b;c","ok.id"]`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f2 := &Engine{brain: m.e.brain}
+	f2.loadBanned()
+	if !f2.pifBanned["ZP11.1.1"] || !f2.pifBanned["ok.id"] || len(f2.pifBanned) != 2 {
+		t.Fatalf("only plain tokens may be loaded: %v", f2.pifBanned)
+	}
+	if err := os.WriteFile(fresh.pifBannedPath(), []byte("[1,2"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	f3 := &Engine{brain: m.e.brain}
+	f3.loadBanned()
+	if f3.pifBannedKnown || len(f3.pifBanned) != 0 {
+		t.Fatal("a corrupt denylist file is unknown, never trusted")
+	}
+}
+
+func TestGarbageListingFallsBackToGuessedNamesAndIsAFailure(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	m.net.apiBody = "<html>rate limited</html>"
+	names, listed := m.e.bannedNames(context.Background())
+	if listed || len(names) < 2 || names[0] != "banned-october-meow.prop" {
+		t.Fatalf("garbage must fall back to the guessed names: %v listed=%v", names, listed)
+	}
+}
+
+func TestAnOversizedBannedListIsRefusedNotTruncated(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	var b strings.Builder
+	for i := 0; i < pifMaxSet+50; i++ {
+		fmt.Fprintf(&b, "ID=ZP11.%06d.001\n", i)
+	}
+	m.net.listing = []string{"banned-huge.prop"}
+	m.net.files[pifArchiveBase+"banned-huge.prop"] = b.String()
+	if err := m.e.refreshBanned(context.Background()); err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("got %v", err)
+	}
+	if len(m.e.pifBanned) != 0 {
+		t.Fatal("nothing from an oversized list may be adopted")
+	}
+}
+
+func TestProbeWithoutALogChannelIsUnknownAndKeepsTheInstall(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.e.logs = failingLog{}
+	m.maintain(true)
+	s := m.e.status.PIF
+	if s.ID != "ZP11.261016.008" || s.Applied != "unknown" || s.Evidence != "no_log_channel" || m.restart != 0 {
+		t.Fatalf("%+v restarts=%d", s, m.restart)
+	}
+}
+
+func TestProbeUsesItsDefaultPollWhenNoneIsConfigured(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.e.probePoll = 0
+	m.e.policy.PIF.ProbeWait = 700 * time.Millisecond
+	m.log.mute = true
+	started := time.Now()
+	state, ev := m.e.pifProbe(context.Background(), mustPIF(t, novemberMeow))
+	if state != "unknown" || ev != "marker_not_visible" || time.Since(started) < 500*time.Millisecond {
+		t.Fatalf("%s/%s after %v", state, ev, time.Since(started))
+	}
+}
+
+// security_patch.txt exists but cannot be read (a directory in its place): the audit says "unknown" and an install
+// refuses BEFORE touching anything.
+func TestUnreadablePatchFileIsReportedAndBlocksAnInstall(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	if err := os.Remove(m.patch); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(m.patch, 0755); err != nil {
+		t.Fatal(err)
+	}
+	before := m.propText()
+	m.maintain(true)
+	if m.e.status.PIF.PatchPair != "unknown" {
+		t.Fatalf("pair = %s", m.e.status.PIF.PatchPair)
+	}
+	if m.propText() != before || !strings.Contains(m.e.status.PIF.Reason, "unreadable") || m.restart != 0 || m.e.pifFailures != 1 {
+		t.Fatalf("reason=%q failures=%d", m.e.status.PIF.Reason, m.e.pifFailures)
+	}
+}
+
+// A module directory that cannot be written: the install fails cleanly, the file is untouched, the failure is counted.
+func TestInstallFailsCleanlyWhenTheModuleDirectoryIsReadOnly(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not stop root")
+	}
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	dir := filepath.Dir(m.prop)
+	if err := os.Chmod(dir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(dir, 0755)
+	before := m.propText()
+	m.maintain(true)
+	if m.propText() != before || !strings.Contains(m.e.status.PIF.Reason, "install_failed") || m.e.pifFailures != 1 || m.patchText() != "all=2026-10-05\n" {
+		t.Fatalf("reason=%q failures=%d patch=%q", m.e.status.PIF.Reason, m.e.pifFailures, m.patchText())
+	}
+}
+
+// pifMaintain notices an unrepairable patch file and says so in the status (the daemon is not stopped by it).
+func TestMaintainReportsAFailedPatchRepairInTheStatus(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("directory permissions do not stop root")
+	}
+	m := newMaintain(t, novemberMeow, "all=2026-10-05\n") // healthy fingerprint, stale patch: only the repair is attempted
+	m.e.pifBanned = map[string]bool{}
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+	tsDir := filepath.Dir(m.patch)
+	if err := os.Chmod(tsDir, 0500); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(tsDir, 0755)
+	m.maintain(true)
+	if !strings.Contains(m.e.status.PIF.Reason, "patch_sync_failed") || m.e.pifSyncFails != 1 {
+		t.Fatalf("reason=%q fails=%d", m.e.status.PIF.Reason, m.e.pifSyncFails)
+	}
+}
+
+func TestDeadlineOfAHealthyFingerprintWithAClosedWindowDependsOnTheClock(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	e := m.e
+	e.status.PIF = PIFStatus{State: "ok", Expires: "2026-11-17", PatchPair: "match"} // the renew window opened on 2026-11-14
+	e.clock = func() time.Time { return time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC) }
+	e.status.TimeState = "unknown_or_disagrees"
+	if d := e.pifDeadline().Sub(e.now()); d != 2*time.Hour {
+		t.Fatalf("unverified clock: %v, want 2h", d)
+	}
+	e.status.TimeState = "verified"
+	if d := e.pifDeadline().Sub(e.now()); d != 30*time.Minute {
+		t.Fatalf("verified clock: %v, want 30m", d)
+	}
+}
+
+func TestAnUnknownSourceNameIsSkippedNotFatal(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.e.policy.PIF.Sources = []string{"bogus", "archive"}
+	m.maintain(true)
+	if m.e.status.PIF.ID != "ZP11.261016.008" {
+		t.Fatalf("%+v", m.e.status.PIF)
+	}
+}
+
+// The REAL command runner (what killall / am startservice use on the phone): exercised here, and on the phone
+// by device_test.sh, with harmless commands.
+func TestTheRealCommandRunnerReportsSuccessFailureAndCancellation(t *testing.T) {
+	ctx := context.Background()
+	if err := runCommand(ctx, "true"); err != nil {
+		t.Fatalf("true: %v", err)
+	}
+	if err := runCommand(ctx, "false"); err == nil {
+		t.Fatal("false must fail")
+	}
+	if err := runCommand(ctx, "/nonexistent/command-xyz"); err == nil {
+		t.Fatal("a missing command must fail")
+	}
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	if err := runCommand(cancelled, "sleep", "5"); err == nil {
+		t.Fatal("a cancelled context must stop the command")
+	}
+}
+
+// The patch file is "written" successfully but holds something else: the readback catches it, counts a failure,
+// and the stale value stays (never a half-written patch).
+func TestPatchWriteThatStoredSomethingElseIsCaught(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-10-05\n")
+	f, p := m.e.pifAudit(true)
+	m.e.pifWriter = func(path string, data []byte, mode os.FileMode) error {
+		return os.WriteFile(path, []byte("all=2026-1"), mode) // torn: success reported, content wrong
+	}
+	err := m.e.pifSyncPatch(f, p)
+	if err == nil || !strings.Contains(err.Error(), "readback differs") || m.e.pifSyncFails != 1 {
+		t.Fatalf("err=%v fails=%d", err, m.e.pifSyncFails)
+	}
+}
+
+// ---- the plan's invariants and decisions, pinned ----
+
+// I-HTTPS: every endpoint the contour can contact is https, on an allowlisted host, without credentials, and the
+// policy rejects the usual tricks. A new source added later cannot silently use another scheme or host.
+func TestEveryPIFEndpointIsHTTPSAndOnAnAllowlistedHost(t *testing.T) {
+	urls := []string{pifArchiveBase + "meow.prop", pifArchiveBase + "banned-x.prop", pifReleaseAPI, pifFlashPage,
+		fmt.Sprintf(pifStationFmt, "bluejay_beta", "AIzaSyD-bwHpMvFCN3PfRN4Txsw_ECg_iptNfMQ")}
+	for _, raw := range urls {
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme != "https" || u.User != nil || !allowedHost(u.Hostname()) || (u.Port() != "" && u.Port() != "443") {
+			t.Errorf("%s is not an https URL on an allowlisted host", raw)
+		}
+	}
+	e := &Engine{request: func(*http.Request) (*http.Response, error) { return reply(200, []byte("x")), nil }}
+	for _, bad := range []string{"http://api.github.com/x", "https://api.github.com.evil.example/x", "https://flash.android.com@evil.example/x",
+		"https://api.github.com:8443/x", "https://github.com.attacker.example/x"} {
+		if _, err := e.get(context.Background(), bad, 100); err == nil {
+			t.Errorf("%s must be refused by the URL policy", bad)
+		}
+	}
+}
+
+// Decisions D8-D11 of the plan: the defaults are part of the contract.
+func TestPolicyDefaultsAreTheDecisionsOfThePlan(t *testing.T) {
+	p := defaultPolicy().PIF
+	if p.Mode != "auto" || p.FollowLatest || !p.SyncPatch || !p.Probe || p.RenewBefore != 72*time.Hour || p.Lifetime != 42*24*time.Hour ||
+		p.ProbeWait != 15*time.Second || strings.Join(p.Sources, ",") != "archive,google" {
+		t.Fatalf("defaults drifted from the plan: %+v", p)
+	}
+	// an absent or empty policy file yields exactly these
+	got, notes := parsePolicy("")
+	if got.PIF.Mode != p.Mode || len(notes) != 0 {
+		t.Fatalf("empty file: %+v %v", got.PIF, notes)
+	}
+}
+
+// The engine's zero value (tests, first cycle) behaves as the defaults.
+func TestZeroPolicyBehavesAsTheDefaults(t *testing.T) {
+	e := &Engine{}
+	if p := e.pifPolicy(); p.Mode != "auto" || p.RenewBefore != 72*time.Hour {
+		t.Fatalf("%+v", p)
 	}
 }

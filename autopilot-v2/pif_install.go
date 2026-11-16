@@ -187,11 +187,7 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 		return errors.New("rendered file invalid: " + err.Error())
 	}
 	restoreAll := func() { e.pifRestore(prop, orig, absent) }
-	write := e.writeMeta
-	if e.pifWriter != nil {
-		write = e.pifWriter
-	}
-	if err = write(prop, data, 0644); err != nil {
+	if err = e.writeFile(prop, data, 0644); err != nil {
 		return err
 	}
 	back, _, err := readOptional(prop, pifMaxBytes)
@@ -205,6 +201,8 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 		return errors.New("patch pair repair failed; previous file restored: " + err.Error())
 	}
 	if e.status.PIF.PatchPair == "mismatch" {
+		// Defensive tripwire: unreachable by construction (the pair is checked before the write and repaired right
+		// after it), kept because this is the line that would otherwise leave the incident's state on the phone.
 		restoreAll()
 		return errors.New("patch pair still mismatched; previous file restored")
 	}
@@ -241,15 +239,18 @@ var pifRespawnDelay = 500 * time.Millisecond
 // app happens to use DroidGuard, so nothing is spoofed or logged for a long time). The PING intent
 // is the one DroidGuardService itself declares. One `am` call = one JVM start: acceptable, it runs
 // only when a fingerprint was actually installed.
+// runCommand is the real command runner of the contour (tests replace it through Engine.runCommand).
+func runCommand(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
 func (e *Engine) restartPlayServices(ctx context.Context) error {
 	if e.restartGMS != nil {
 		return e.restartGMS(ctx)
 	}
 	run := e.runCommand
 	if run == nil {
-		run = func(ctx context.Context, name string, args ...string) error {
-			return exec.CommandContext(ctx, name, args...).Run()
-		}
+		run = runCommand
 	}
 	// The same three processes the module's own restart_google_services kills: Play Services and the Play
 	// Store may keep an attestation built with the previous fingerprint (observed on the phone: after a

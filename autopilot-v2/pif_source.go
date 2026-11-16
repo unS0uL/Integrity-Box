@@ -201,9 +201,6 @@ func (e *Engine) pifEligible(cand, cur pifFile, curState string, now time.Time, 
 		if !curExp.IsZero() && !candExp.IsZero() && !candExp.After(curExp) {
 			return false, "not_newer"
 		}
-		if candExp.IsZero() && !curExp.IsZero() {
-			return false, "candidate_expiry_unknown"
-		}
 		return true, ""
 	}
 	return false, "state_" + curState

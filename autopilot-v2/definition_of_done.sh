@@ -79,6 +79,15 @@ if command -v node >/dev/null 2>&1 && [ -f "$HERE/test_webui.cjs" ]; then step "
 echo "== lint (the self-learning barrier)"
 if [ -f "$LINT" ]; then step "android_lint over the repository" python3 "$LINT" "$ROOT"; else note "android_lint.py not found at $LINT"; fi
 
+CHECKDOCS=${CHECK_DOCS:-/Volumes/Sam970/Temp/mi8AI/tools/android-lint/check_docs.py}
+DOCSDIR=${DOCS_DIR:-/Volumes/Sam970/Temp/mi8AI/docs/integrity-box}
+if [ -f "$CHECKDOCS" ] && [ -d "$DOCSDIR" ]; then
+    step "documents promise nothing that does not exist (tests, files, policy keys, exit codes, stale counts)" \
+        python3 "$CHECKDOCS" "$ROOT" "$DOCSDIR/AUTOPILOT_GUIDE.md" "$DOCSDIR/AUTOPILOT_V4_PIF_DESIGN.md" "$DOCSDIR/AUTOPILOT_V3_DESIGN.md" "$DOCSDIR/README.md" "$ROOT/../DEVELOPMENT_RULES.md"
+else
+    note "check_docs.py or the documents directory not found: document claims were NOT checked"
+fi
+
 if [ -n "$DEVICE" ]; then
     echo "== on the phone"
     step "device tests (Go suite + boot-script test under the phone's shell)" sh "$HERE/device_test.sh" "$DEVICE"

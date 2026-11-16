@@ -174,7 +174,7 @@ func (e *Engine) pifSyncPatch(f pifFile, pf patchFile) error {
 	if bytes.Equal(want, orig) {
 		return nil
 	}
-	if err = e.writeMeta(e.patchPath(), want, 0644); err != nil {
+	if err = e.writeFile(e.patchPath(), want, 0644); err != nil {
 		e.pifSyncFails++
 		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()
 		logEvent("pif_patch_sync_failed", "local", e.pifSyncFails)
@@ -192,6 +192,14 @@ func (e *Engine) pifSyncPatch(f pifFile, pf patchFile) error {
 	e.status.PIF.Action = "patch_synced"
 	logEvent("pif_patch_synced", "local", 0)
 	return nil
+}
+
+// writeFile is writeMeta, or the test seam standing in for it (a "successful" write that stored something else).
+func (e *Engine) writeFile(path string, data []byte, mode os.FileMode) error {
+	if e.pifWriter != nil {
+		return e.pifWriter(path, data, mode)
+	}
+	return e.writeMeta(path, data, mode)
 }
 
 // writeMeta atomically replaces path keeping owner, group, mode (default defMode for a new

@@ -404,3 +404,18 @@ func TestPatchFilePrecedenceDoesNotDependOnLineOrder(t *testing.T) {
 		}
 	}
 }
+
+func TestParseRejectsAFingerprintWithoutItsColonFields(t *testing.T) {
+	text := strings.Replace(novemberMeow, "google/bluejay_beta/bluejay:CANARY/ZP11.261016.008/16754936:user/release-keys", "google/bluejay_beta/bluejay/CANARY/ZP11.261016.008/16754936", 1)
+	if _, err := parsePIF([]byte(text)); err == nil || !strings.Contains(err.Error(), "FINGERPRINT shape") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestABuildIdWithAnImpossibleDateHasNoReleaseDate(t *testing.T) {
+	text := strings.ReplaceAll(novemberMeow, "ZP11.261016.008", "ZP11.269999.008")
+	f := mustPIF(t, text)
+	if !f.releaseDate().IsZero() || !f.expiry(42*24*time.Hour).IsZero() {
+		t.Fatalf("an impossible date must not become a date: %v", f.releaseDate())
+	}
+}
