@@ -63,6 +63,14 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	defer func() { e.scope = "" }()
 
 	pol := e.pifPolicy()
+	// The contour no longer depends on the keybox work having reached its own time check (it runs even
+	// when Tricky Store is absent): verify the clock here unless this cycle already did.
+	fresh := e.timeFresh
+	e.timeFresh = false // the flag belongs to ONE cycle: consume it so a later call checks again
+	if !fresh {
+		_ = e.checkTime(ctx)
+		e.timeFresh = false // our own check serves this call only
+	}
 	timeOK := e.status.TimeState == "verified"
 	e.loadBanned()
 	cleanStale(filepath.Dir(e.pifPropPath()), pifStaleTmpAge)
@@ -70,8 +78,11 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	if timeOK && (!automatic || e.uptime() >= e.pifBannedDue) {
 		wait := 6 * time.Hour
 		if err := e.refreshBanned(ctx); err != nil {
-			wait = 2 * time.Hour
-			logEvent("pif_denylist_error", "local", 0)
+			e.pifBannedFails++
+			wait = pifBackoff(e.pifBannedFails) // 2, 4, 8, 16, 24 h: an outage must not be hammered
+			logEvent("pif_denylist_error", "local", e.pifBannedFails)
+		} else {
+			e.pifBannedFails = 0
 		}
 		e.pifBannedDue = e.uptime() + wait.Seconds()
 	}
@@ -100,7 +111,10 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	if cand == nil {
 		wait := 6 * time.Hour
 		if strings.HasSuffix(why, "_unavailable") {
-			wait = pifBackoff(1)
+			e.pifSearchFails++
+			wait = pifBackoff(e.pifSearchFails)
+		} else {
+			e.pifSearchFails = 0 // the sources answered: there is simply nothing eligible yet
 		}
 		e.pifSearchDue = e.uptime() + wait.Seconds()
 		e.status.PIF.Reason = "no_replacement:" + why
@@ -114,7 +128,7 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 		e.status.PIF.Reason = "install_failed: " + err.Error()
 		logEvent("pif_install_failed", "local", e.pifFailures)
 	} else {
-		e.pifFailures = 0
+		e.pifFailures, e.pifSearchFails = 0, 0
 	}
 	e.publish()
 }
@@ -161,7 +175,7 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	if !pol.SyncPatch && pf.Kind != "stock" && pf.Kind != "none" && pf.pair(cand.patch()) != "match" {
 		return errors.New("would leave the patch pair mismatched while pif_sync_patch is off")
 	}
-	data := cand.render(tail, cand.releaseDate(), cand.expiry(pol.Lifetime), time.Now().Format("2006-01-02"))
+	data := cand.render(tail, cand.releaseDate(), cand.expiry(pol.Lifetime), e.now().Format("2006-01-02"))
 	if _, err = parsePIF(data); err != nil {
 		return errors.New("rendered file invalid: " + err.Error())
 	}

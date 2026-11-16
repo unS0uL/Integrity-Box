@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -42,6 +43,7 @@ func (f *pifFakeLog) add(line string) {
 type netFake struct {
 	files   map[string]string // URL -> body (200); absent URL -> 404
 	listing []string          // asset names for the release API
+	apiDown bool              // the release listing answers 500 while the files stay readable
 	down    bool
 	hits    map[string]int
 }
@@ -54,6 +56,9 @@ func (n *netFake) do(r *http.Request) (*http.Response, error) {
 	n.hits[u]++
 	if n.down {
 		return nil, os.ErrDeadlineExceeded
+	}
+	if u == pifReleaseAPI && n.apiDown {
+		return reply(500, nil), nil
 	}
 	if u == pifReleaseAPI {
 		type asset struct {
@@ -96,8 +101,9 @@ func newMaintain(t *testing.T, pifText, patchText string) *maintainFixture {
 	m.log = &pifFakeLog{}
 	e.request = m.net.do
 	e.logs = m.log
+	e.policy.PIF.Sources = []string{"archive"} // google has its own tests
 	e.bootClock = func() float64 { return 100000 }
-	e.status.TimeState = "verified"
+	e.timeCheck = func(context.Context) error { return nil } // the clock is trusted unless a test says otherwise
 	e.policy.PIF.ProbeWait = 80 * time.Millisecond
 	e.probePoll = 5 * time.Millisecond
 	e.restartGMS = func(context.Context) error {
@@ -250,7 +256,9 @@ func TestMaintainLeavesHealthyAndForeignStatesAlone(t *testing.T) {
 		{"healthy and follow_latest off", healthy, "all=2026-11-05\n", nil},
 		{"manual mode", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) { m.e.policy.PIF.Mode = "manual" }},
 		{"off mode", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) { m.e.policy.PIF.Mode = "off" }},
-		{"clock not verified", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) { m.e.status.TimeState = "unknown_or_disagrees" }},
+		{"clock not verified", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) {
+			m.e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
+		}},
 		{"no fingerprint file at all", "", "all=2026-10-05\n", nil},
 		{"invalid fingerprint is reported, not overwritten", strings.Replace(octoberPIF, "ID=ZP11.260918.007", "ID=OTHER", 1), "all=2026-10-05\n", nil},
 		{"dry run", octoberPIF, "all=2026-10-05\n", func(m *maintainFixture) { m.e.dryRun = true }},
@@ -411,8 +419,7 @@ func TestRefreshBannedKeepsKnownBansWhenNothingIsReadable(t *testing.T) {
 	}
 	// listing unavailable -> fall back to the known file names
 	m.net.down = false
-	m.net.listing = nil
-	delete(m.net.files, pifReleaseAPI)
+	m.net.apiDown = true
 	if err := m.e.refreshBanned(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -420,6 +427,7 @@ func TestRefreshBannedKeepsKnownBansWhenNothingIsReadable(t *testing.T) {
 		t.Fatalf("fallback names must still read the October ban: %v", m.e.pifBanned)
 	}
 	// hostile listing entries are ignored
+	m.net.apiDown = false
 	m.net.listing = []string{"../../etc/passwd", "banned-x.prop;rm", "banned-UPPER.prop", "banned-ok.prop"}
 	m.net.files[pifArchiveBase+"banned-ok.prop"] = "ID=ZP11.111111.001\nFINGERPRINT=google/x/x:CANARY/ZP11.111111.001/1:user/release-keys\n"
 	if err := m.e.refreshBanned(context.Background()); err != nil {
@@ -469,7 +477,7 @@ func TestMaintainWaitsForVerifiedClockEvenForAKnownBan(t *testing.T) {
 	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
 	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
 	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
-	m.e.status.TimeState = "unknown_or_disagrees"
+	m.e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
 	before := m.propText()
 	m.maintain(true)
 	if m.propText() != before || m.restart != 0 {
@@ -481,7 +489,7 @@ func TestMaintainWaitsForVerifiedClockEvenForAKnownBan(t *testing.T) {
 	if m.e.status.PIF.State != "banned" {
 		t.Fatalf("the known ban must still be reported: %+v", m.e.status.PIF)
 	}
-	m.e.status.TimeState = "verified"
+	m.e.timeCheck = func(context.Context) error { return nil }
 	m.maintain(true)
 	if m.e.status.PIF.ID != "ZP11.261016.008" {
 		t.Fatalf("once the clock is verified the replacement happens: %+v", m.e.status.PIF)
@@ -580,7 +588,7 @@ func TestDenylistIsMergedNeverShrunkAndFailsClosedWhenUnknown(t *testing.T) {
 	// nothing known and nothing readable: no replacement is attempted at all
 	m2 := newMaintain(t, octoberPIF, "all=2026-10-05\n")
 	m2.net.files = map[string]string{pifArchiveBase + "meow.prop": novemberMeow} // listing empty, banned files 404
-	m2.net.listing = nil
+	m2.net.apiDown = true
 	m2.e.pifBanned = map[string]bool{"ZP11.260918.007": true} // the current file is known banned from memory...
 	m2.e.pifBannedKnown = false                               // ...but the denylist was never read successfully
 	before := m2.propText()
@@ -597,7 +605,10 @@ func TestDenylistListingKeepsTheNewestNamesInAPIOrder(t *testing.T) {
 		names = append(names, "banned-m"+string(rune('a'+i))+".prop")
 	}
 	m.net.listing = append([]string{"meow.prop"}, names...)
-	got := m.e.bannedNames(context.Background())
+	got, listed := m.e.bannedNames(context.Background())
+	if !listed {
+		t.Fatal("a working listing must be reported as such")
+	}
 	if len(got) != pifMaxBanned || got[len(got)-1] != "banned-mt.prop" || got[0] != "banned-me.prop" {
 		t.Fatalf("the newest %d names in upload order must be kept: %v", pifMaxBanned, got)
 	}
@@ -834,5 +845,210 @@ func TestPlayServicesRestartKillsThenRespawnsDroidGuard(t *testing.T) {
 	calls = nil
 	if err := e.restartPlayServices(ctx); err == nil || len(calls) != 1 {
 		t.Fatalf("cancelled restart: err=%v calls=%q", err, calls)
+	}
+}
+
+// "Nothing has been withdrawn yet" is an answer, not a failure: the denylist is then known and empty,
+// and replacement decisions are not blocked forever.
+func TestAnEmptyButSuccessfulListingCountsAsAKnownEmptyDenylist(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	m.net.listing = []string{"meow.prop", "Megatron"} // no banned-*.prop at all
+	if err := m.e.refreshBanned(context.Background()); err != nil || !m.e.pifBannedKnown {
+		t.Fatalf("err=%v known=%v", err, m.e.pifBannedKnown)
+	}
+	// ...but a failed listing with unreadable fallbacks is still an error and stays unknown
+	m2 := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	m2.net.down = true
+	if err := m2.e.refreshBanned(context.Background()); err == nil || m2.e.pifBannedKnown {
+		t.Fatalf("a dead network is not a known empty list: err=%v known=%v", err, m2.e.pifBannedKnown)
+	}
+}
+
+// ---- the whole cycle(), not only pifMaintain: what a daemon tick really does ----
+
+// BASIC/DEVICE depend on PIF whether or not the keybox consumer is installed.
+func TestCycleRunsTheFingerprintContourEvenWithoutTheKeyboxConsumer(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-11-05\n") // banned fingerprint AND a mismatched pair
+	m.e.requireConsumer = true
+	m.e.modulesRoot = t.TempDir() // no tricky_store module at all
+	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+	err := m.e.cycle(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "consumer") {
+		t.Fatalf("the keybox contour must still report the missing consumer: %v", err)
+	}
+	if m.e.status.PIF.ID != "ZP11.261016.008" || m.patchText() != "all=2026-11-05\n" || m.e.status.PIF.PatchPair != "match" {
+		t.Fatalf("the fingerprint contour must have done its work: %+v patch=%q", m.e.status.PIF, m.patchText())
+	}
+}
+
+// With an unverified clock the cycle stops early for the key, but the clock-free part of the contour
+// (patch repair) already happened and no replacement is attempted.
+func TestCycleRepairsThePatchButReplacesNothingWhenTheClockIsUnknown(t *testing.T) {
+	synced := strings.Replace(octoberPIF, "SECURITY_PATCH=2026-10-05", "SECURITY_PATCH=2026-11-05", 1)
+	m := newMaintain(t, synced, "all=2026-10-05\n")
+	m.e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
+	m.e.pifBanned = map[string]bool{"ZP11.260918.007": true}
+	m.e.pifBannedKnown, m.e.pifBannedDue = true, 1e12
+	if err := m.e.cycle(context.Background(), true); err == nil {
+		t.Fatal("the key contour reports the unknown clock")
+	}
+	if m.patchText() != "all=2026-11-05\n" {
+		t.Fatalf("the patch must be repaired without a clock: %q", m.patchText())
+	}
+	if m.propText() != synced || m.net.hits[pifArchiveBase+"meow.prop"] != 0 {
+		t.Fatal("no replacement and no candidate fetch without a verified clock")
+	}
+}
+
+// pif_mode=off (set the way a user sets it, in autopilot.conf): the cycle must not touch the fingerprint
+// or ask the network about it. The keybox contour keeps its own traffic.
+func TestCycleLeavesTheFingerprintAloneWhenTheContourIsOff(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-11-05\n")
+	if err := os.WriteFile(filepath.Join(m.e.brain, "autopilot.conf"), []byte("pif_mode = off\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	_ = m.e.cycle(context.Background(), true)
+	if m.propText() != octoberPIF || m.patchText() != "all=2026-11-05\n" {
+		t.Fatal("off means the files are not touched")
+	}
+	for url := range m.net.hits {
+		if strings.Contains(url, "meow.prop") || strings.Contains(url, "banned-") || url == pifReleaseAPI || strings.Contains(url, "flash") {
+			t.Fatalf("off means no fingerprint traffic, saw %s", url)
+		}
+	}
+	if m.e.status.PIF.State != "off" {
+		t.Fatalf("status must say off: %+v", m.e.status.PIF)
+	}
+}
+
+// ---- the daemon's wake-up schedule: wake when there is something to do, never poll ----
+
+func TestDeadlineWakesTheDaemonOnlyWhenThereIsSomethingToDo(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	e := m.e
+	now := e.now()
+	e.pifAudit(true)
+	// healthy: the renew window opens at expiry (2026-11-27) minus 72h
+	if d := e.pifDeadline(); d.Format("2006-01-02") != "2026-11-24" {
+		t.Fatalf("healthy: wake at the opening of the renew window, got %v", d)
+	}
+	// replacement needed, a search just failed: wake at the next allowed search, not in 30 minutes
+	e.status.PIF.State = "expiring"
+	e.pifSearchDue = e.uptime() + 6*3600
+	if d := e.pifDeadline(); d.Sub(now) < 5*time.Hour+50*time.Minute || d.Sub(now) > 6*time.Hour+10*time.Minute {
+		t.Fatalf("after a failed search the next wake is the next allowed search (~6h), got %v", d.Sub(now))
+	}
+	e.pifSearchDue = 0 // never searched: soon
+	if d := e.pifDeadline(); d.Sub(now) > 31*time.Minute {
+		t.Fatalf("first attempt: soon, got %v", d.Sub(now))
+	}
+	// a pair mismatch the contour can repair: soon; one it may not repair must not cause polling
+	e.status.PIF.State, e.status.PIF.PatchPair = "ok", "mismatch"
+	if d := e.pifDeadline(); d.Sub(now) > 31*time.Minute {
+		t.Fatalf("repairable mismatch: soon, got %v", d.Sub(now))
+	}
+	e.policy.PIF.SyncPatch = false
+	e.status.PIF.Expires = ""
+	if d := e.pifDeadline(); !d.IsZero() {
+		t.Fatalf("a mismatch we may not repair must not wake the daemon: %v", d)
+	}
+	// manual / off / an unreadable file: the daemon's own schedule is enough
+	for _, mode := range []string{"manual", "off"} {
+		e.policy.PIF.Mode = mode
+		if d := e.pifDeadline(); !d.IsZero() {
+			t.Fatalf("%s: no wake-ups, got %v", mode, d)
+		}
+	}
+	e.policy.PIF.Mode = "auto"
+	e.status.PIF.State = "invalid"
+	e.status.PIF.PatchPair = "n/a"
+	if d := e.pifDeadline(); !d.IsZero() {
+		t.Fatalf("an unreadable user file is not polled: %v", d)
+	}
+}
+
+// How often does a daemon that follows pifDeadline really run the cycle when the maintainer is silent and
+// Google is down for months? (Each cycle costs a JVM start for the clock probe.)
+func TestDaemonCycleRateStaysLowWhenNoReplacementExists(t *testing.T) {
+	first := time.Date(2026, 10, 16, 0, 0, 0, 0, time.UTC)
+	w := &world{builds: feed(first, []int{0}), banLag: 48 * time.Hour, googleUp: false}
+	m := newMaintain(t, w.builds[0].file()+"\n# Configuration\nspoofBuild=1\n", "all="+w.builds[0].patch()+"\n")
+	m.e.policy.PIF.Sources = []string{"archive", "google"}
+	w.now = time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC)
+	uptime := 100000.0
+	m.e.clock = func() time.Time { return w.now }
+	m.e.bootClock = func() float64 { return uptime }
+	m.net.hits = map[string]int{}
+	m.e.request = func(r *http.Request) (*http.Response, error) { m.net.hits[r.URL.String()]++; return w.handle(r) }
+	cycles := 0
+	end := w.now.AddDate(0, 0, 90)
+	for w.now.Before(end) {
+		m.maintain(true)
+		cycles++
+		next := w.now.Add(12 * time.Hour) // the daemon's own default
+		if d := m.e.pifDeadline(); !d.IsZero() && d.Before(next) {
+			next = d
+		}
+		if next.Sub(w.now) < time.Minute {
+			next = w.now.Add(time.Minute)
+		}
+		uptime += next.Sub(w.now).Seconds()
+		w.now = next
+	}
+	if perDay := float64(cycles) / 90; perDay > 6 {
+		t.Fatalf("%d cycles in 90 days (%.1f per day): the schedule polls", cycles, perDay)
+	}
+	if m.e.status.PIF.State != "expired" {
+		t.Fatalf("with no source for 90 days the fingerprint must be reported expired, got %s", m.e.status.PIF.State)
+	}
+}
+
+// ---- the clock is probed exactly as often as needed (each probe is a JVM start on the phone) ----
+
+func countingClock(m *maintainFixture) *int {
+	n := 0
+	m.e.timeCheck = func(context.Context) error { n++; return nil }
+	return &n
+}
+
+// A normal cycle checks the clock once for the key work; the contour reuses that result.
+func TestCycleProbesTheClockOnceNotTwice(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	n := countingClock(m)
+	_ = m.e.cycle(context.Background(), true)
+	if *n != 1 {
+		t.Fatalf("a cycle probed the clock %d times, want exactly 1", *n)
+	}
+}
+
+// A cycle that returns before its own clock check (required consumer missing) must NOT hand the
+// contour a stale "verified" from an earlier cycle: the contour checks for itself, once.
+func TestContourChecksTheClockItselfWhenTheCycleDidNot(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	n := countingClock(m)
+	m.e.requireConsumer = true
+	m.e.modulesRoot = t.TempDir()
+	_ = m.e.cycle(context.Background(), true) // the first cycle also left timeFresh in an arbitrary state
+	_ = m.e.cycle(context.Background(), true)
+	if *n != 2 {
+		t.Fatalf("two cycles without a key-side clock check must give two contour checks, got %d", *n)
+	}
+	// stale knowledge must not survive: the clock becomes unverified between cycles
+	m.e.timeCheck = func(context.Context) error { return errors.New("clock unverified") }
+	_ = m.e.cycle(context.Background(), true)
+	if m.e.status.TimeState == "verified" {
+		t.Fatal("the contour must not keep trusting an earlier verification")
+	}
+}
+
+// Consecutive direct calls each look at the clock (the flag belongs to one cycle).
+func TestEachMaintainCallChecksTheClockUnlessTheCycleJustDid(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	n := countingClock(m)
+	m.maintain(true)
+	m.maintain(true)
+	if *n != 2 {
+		t.Fatalf("got %d checks for 2 calls", *n)
 	}
 }

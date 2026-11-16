@@ -161,17 +161,28 @@ func main() {
 		e.publish()
 	case "pif-refresh":
 		// One fingerprint-contour pass (the Action button and the daemon share this code). It never
-		// touches the daemon's status file. Exit 3 means "pif_mode=off": the caller may use its legacy path.
+		// touches the daemon's status file. Exit 3 means "pif_mode=off": the caller may use its legacy
+		// path; exit 4 means "busy": the caller must NOT fall back (the legacy path would pick a random Pixel).
 		e.noPublish = true
 		e.reloadPolicy()
 		if e.pifPolicy().Mode == "off" || e.pifPropPath() == "" {
 			fmt.Println("pif: disabled (pif_mode=off)")
 			os.Exit(3)
 		}
-		searchLock, lerr := lock(filepath.Join(e.ram, "search.lock"))
+		var searchLock *os.File
+		var lerr error
+		for i := 0; i < 60; i++ { // a daemon cycle takes seconds: wait for it instead of failing
+			if searchLock, lerr = lock(filepath.Join(e.ram, "search.lock")); lerr == nil {
+				break
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(time.Second):
+			}
+		}
 		if lerr != nil {
-			err = errors.New("another AutoPilot cycle is running; try again in a minute")
-			break
+			fmt.Println("pif: busy (another AutoPilot cycle is still running)")
+			os.Exit(4)
 		}
 		_ = e.checkTime(ctx) // the audit and the patch repair need no clock; replacements do
 		e.pifMaintain(ctx, false)

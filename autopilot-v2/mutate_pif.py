@@ -4,9 +4,14 @@ import subprocess
 import sys
 
 D = sys.argv[1].rstrip('/') + '/'
-FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go']
+FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go', 'reconcile.go', 'clock.go']
 ORIG = {f: open(D + f).read() for f in FILES}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects'
+# The month-long simulations are slow (~35 s): only mutations of timing/backoff/denylist-state logic run them.
+LIFE = {'empty listing not known', 'denylist backoff flat', 'search backoff flat', 'contour not registered in the cycle', 'denylist replaced instead of merged'}
+# Defense in depth: each of these guards is made redundant by another one, so removing either ALONE cannot change
+# behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
+EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|Clock|Deadline|EachMaintain'
 
 M = [
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
@@ -30,6 +35,14 @@ M = [
     ("probe restart skipped", 'pif_install.go', '	_ = e.restartPlayServices(ctx)', '	_ = ctx'),
     ("respawn request skipped", 'pif_install.go', '	return run(ctx, "am", "startservice", "-n", pifDroidGuard, "-a", pifDroidGuardPing)', '	return nil'),
     ("respawn uses a different intent", 'pif_install.go', 'pifDroidGuardPing = "com.google.android.gms.droidguard.service.PING"', 'pifDroidGuardPing = "com.google.android.gms.droidguard.service.NOPE"'),
+    ("empty listing not known", 'pif_source.go', '		e.pifBannedKnown = true // an authoritative empty list: nothing is withdrawn, remembered bans stay\n', ''),
+    ("denylist backoff flat", 'pif_install.go', '			wait = pifBackoff(e.pifBannedFails) // 2, 4, 8, 16, 24 h: an outage must not be hammered', '			wait = 2 * time.Hour'),
+    ("search backoff flat", 'pif_install.go', '			wait = pifBackoff(e.pifSearchFails)', '			wait = 2 * time.Hour'),
+    ("fresh-clock flag not consumed", 'pif_install.go', '	e.timeFresh = false // the flag belongs to ONE cycle: consume it so a later call checks again\n', ''),
+    ("own clock check leaks freshness", 'pif_install.go', '		e.timeFresh = false // our own check serves this call only\n', ''),
+    ("contour not registered in the cycle", 'reconcile.go', '	defer func() { e.pifMaintain(base, automatic) }()', '	defer func() { _ = base }()'),
+    ("cycle does not reset the clock flag", 'reconcile.go', '	e.timeFresh = false\n	searchLock', '	searchLock'),
+    ("checkTime does not mark freshness", 'clock.go', '	e.timeFresh = true\n', ''),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
 
@@ -58,8 +71,11 @@ try:
             print(f'NOT COMPILABLE (mutation proves nothing): {desc}: {build.stderr.strip().splitlines()[-1][:90]}')
             bad += 1
             continue
-        r = subprocess.run(['go', 'test', '-count=1', '-run', RUN, './...'], cwd=D, capture_output=True, text=True)
-        if r.returncode == 0:
+        pattern = RUN + '|Lifecycle|DaemonCycleRate' if desc in LIFE else RUN
+        r = subprocess.run(['go', 'test', '-count=1', '-run', pattern, './...'], cwd=D, capture_output=True, text=True)
+        if r.returncode == 0 and desc in EQUIVALENT:
+            print('equivalent (redundant guard):', desc)
+        elif r.returncode == 0:
             print('SURVIVED (bad):', desc)
             bad += 1
         else:

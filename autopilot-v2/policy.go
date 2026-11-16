@@ -42,7 +42,7 @@ type PIFPolicy struct {
 
 func defaultPIFPolicy() PIFPolicy {
 	return PIFPolicy{Mode: "auto", RenewBefore: 72 * time.Hour, SyncPatch: true, Probe: true, ProbeWait: 15 * time.Second,
-		Lifetime: 42 * 24 * time.Hour, Sources: []string{"archive"}}
+		Lifetime: 42 * 24 * time.Hour, Sources: []string{"archive", "google"}}
 }
 
 // ConsumerOverride replaces fields of the built-in Tricky Store description.

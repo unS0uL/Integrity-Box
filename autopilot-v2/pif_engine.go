@@ -29,6 +29,13 @@ type PIFStatus struct {
 	Checked     time.Time `json:"checked"`
 }
 
+func (e *Engine) now() time.Time {
+	if e.clock != nil {
+		return e.clock()
+	}
+	return time.Now()
+}
+
 func (e *Engine) pifPropPath() string {
 	if e.moduleRoot == "" {
 		return ""
@@ -76,7 +83,7 @@ func readOptional(path string, limit int64) ([]byte, bool, error) {
 func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
 	pol := e.pifPolicy()
 	st := PIFStatus{Mode: pol.Mode, PatchPair: "n/a", Applied: e.status.PIF.Applied, Evidence: e.status.PIF.Evidence,
-		Action: e.status.PIF.Action, Checked: time.Now()}
+		Action: e.status.PIF.Action, Checked: e.now()}
 	if st.Applied == "" {
 		st.Applied = "not_probed"
 	}
@@ -94,7 +101,7 @@ func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
 			f, perr = parsePIF(raw)
 		}
 	}
-	st.State = classifyPIF(f, perr, absent, time.Now(), timeOK, pol, e.pifBanned)
+	st.State = classifyPIF(f, perr, absent, e.now(), timeOK, pol, e.pifBanned)
 	if perr != nil {
 		st.Reason = perr.Error()
 	}
@@ -219,24 +226,39 @@ func (e *Engine) writeMeta(path string, data []byte, defMode os.FileMode) error 
 	return syncDir(filepath.Dir(path))
 }
 
-// pifDeadline is the next time the daemon should look at the fingerprint again (zero = no need).
+// pifDeadline is the next time the daemon should look at the fingerprint again (zero = no need,
+// the daemon's own schedule is enough). Every daemon cycle costs a clock probe (a JVM start) and a
+// key audit, so the contour wakes the daemon exactly when it has something to do and never polls:
+//   - a pair mismatch that this contour may repair: soon (30 min);
+//   - a fingerprint that needs replacing: at the next allowed search (6 h / backoff after a search), soon for the first try;
+//   - a healthy fingerprint: when its renew window opens.
 func (e *Engine) pifDeadline() time.Time {
 	if !e.pifActive() {
 		return time.Time{}
 	}
-	s := e.status.PIF
-	if s.State == "banned" || s.State == "expired" || s.State == "invalid" || s.PatchPair == "mismatch" {
-		if wait := e.pifSearchDue - e.uptime(); wait > 1800 && s.PatchPair != "mismatch" {
-			return time.Now().Add(time.Duration(wait * float64(time.Second))) // a failed search backs off
-		}
-		return time.Now().Add(30 * time.Minute)
+	pol := e.pifPolicy()
+	if pol.Mode != "auto" {
+		return time.Time{} // manual: report only, nothing to do ahead of the daemon's own schedule
 	}
-	if t, err := time.Parse("2006-01-02", s.Expires); err == nil {
-		d := t.Add(-e.pifPolicy().RenewBefore)
-		if d.After(time.Now()) {
-			return d
+	s := e.status.PIF
+	now := e.now()
+	soon := now.Add(30 * time.Minute)
+	if s.PatchPair == "mismatch" && pol.SyncPatch {
+		return soon
+	}
+	switch s.State {
+	case "banned", "expired", "expiring":
+		if wait := e.pifSearchDue - e.uptime(); wait > 1800 {
+			return now.Add(time.Duration(wait * float64(time.Second)))
 		}
-		return time.Now().Add(30 * time.Minute)
+		return soon
+	case "ok":
+		if t, err := time.Parse("2006-01-02", s.Expires); err == nil {
+			if d := t.Add(-pol.RenewBefore); d.After(now) {
+				return d
+			}
+			return soon
+		}
 	}
 	return time.Time{}
 }

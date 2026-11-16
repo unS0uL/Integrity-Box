@@ -778,6 +778,24 @@ kill_process() {
   [ -n "$PID" ] && kill -9 $PID 2>/dev/null
 }
 
+# The fingerprint step of the Action button. The AutoPilot engine owns the fingerprint; the legacy
+# generator (osm0sis.sh) is used ONLY when the engine is missing or the user turned the contour off
+# (exit 3 = pif_mode=off). Any other outcome (busy = 4, engine error) must not fall back: osm0sis.sh
+# would replace a good fingerprint with a random one that the denylist never saw.
+refresh_pif_fingerprint() {
+  local scripts="$MODPATH/webroot/common_scripts" rc
+  if [ -x "$scripts/bin/box-autopilot" ]; then
+    sh "$scripts/autopilot.sh" pif-refresh
+    rc=$?
+    if [ "$rc" -eq 3 ]; then
+      sh "$MODPATH/osm0sis.sh" || true
+    fi
+  else
+    sh "$MODPATH/osm0sis.sh" || true
+  fi
+  return 0
+}
+
 restart_google_services() {
   for proc in com.google.android.gms.unstable com.google.android.gms com.android.vending; do
     kill_process "$proc"

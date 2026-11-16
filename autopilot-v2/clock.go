@@ -91,6 +91,7 @@ func (e *Engine) probeNetworkClock(ctx context.Context) error {
 
 func (e *Engine) checkTime(ctx context.Context) error {
 	err := e.probeTime(ctx)
+	e.timeFresh = true
 	e.status.TimeState = "verified"
 	if err != nil {
 		e.status.TimeState = "unknown_or_disagrees"

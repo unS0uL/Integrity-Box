@@ -37,6 +37,8 @@ func generation(brain string) string {
 }
 
 func (e *Engine) cycle(ctx context.Context, automatic bool) error {
+	base := ctx
+	e.timeFresh = false
 	searchLock, lockErr := lock(filepath.Join(e.ram, "search.lock"))
 	if lockErr != nil {
 		return errors.New("search already running")
@@ -67,15 +69,18 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 	e.auditConsumer(ctx, !e.dryRun)
 	// The fingerprint contour is independent of the keybox contour: a failure here is logged and
 	// never blocks (or is blocked by) the key. Patch repair needs no network and no clock.
-	pifFile, pifPatch := e.pifAudit(e.status.TimeState == "verified")
+	pifFile, pifPatch := e.pifAudit(false) // expiry is judged later, with a clock verified in this cycle
 	if er := e.pifSyncPatch(pifFile, pifPatch); er != nil {
 		logEvent("pif_cycle_error", "local", 0)
 	}
+	// The fingerprint contour runs when the key work is finished, WHATEVER path returns (also when the
+	// keybox consumer is missing: BASIC depends on PIF alone), with its own time budget and its own
+	// HTTP cooldown scope: it can neither starve nor cool down the key contour.
+	defer func() { e.pifMaintain(base, automatic) }()
 	if e.requireConsumer && !e.status.Consumer.Present {
 		e.status.Phase = "required_consumer_missing"
 		return errors.New("required keybox consumer is not installed")
 	}
-	base := ctx
 	ctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	if !e.dryRun {
@@ -85,9 +90,6 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		}
 	}
 	e.crl(ctx)
-	// The fingerprint contour runs when the key work is finished (whatever path returns) and has its
-	// own time budget and its own HTTP cooldown scope: it can neither starve nor cool down the key.
-	defer func() { e.pifMaintain(base, automatic) }()
 	h := e.status.Local
 	if h.State == "time_unknown" {
 		return errors.New("system clock unknown")

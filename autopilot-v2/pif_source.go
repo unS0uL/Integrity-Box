@@ -56,10 +56,10 @@ func (e *Engine) loadBanned() {
 // bannedNames lists banned-*.prop assets of the release in the API's own (upload) order and keeps
 // the newest pifMaxBanned. A failed listing falls back to the one name known to exist; the bans
 // already remembered are never dropped (see refreshBanned), so a rate-limited API only delays news.
-func (e *Engine) bannedNames(ctx context.Context) []string {
+func (e *Engine) bannedNames(ctx context.Context) (names []string, listed bool) {
 	body, err := e.get(ctx, pifReleaseAPI, 256<<10)
 	if err != nil {
-		return pifFallbackBanned
+		return pifFallbackBanned, false
 	}
 	var rel struct {
 		Assets []struct {
@@ -67,9 +67,8 @@ func (e *Engine) bannedNames(ctx context.Context) []string {
 		} `json:"assets"`
 	}
 	if json.Unmarshal(body, &rel) != nil {
-		return pifFallbackBanned
+		return pifFallbackBanned, false
 	}
-	var names []string
 	seen := map[string]bool{}
 	for _, a := range rel.Assets {
 		if pifBannedName.MatchString(a.Name) && !seen[a.Name] {
@@ -80,10 +79,8 @@ func (e *Engine) bannedNames(ctx context.Context) []string {
 	if len(names) > pifMaxBanned {
 		names = names[len(names)-pifMaxBanned:]
 	}
-	if len(names) == 0 {
-		return pifFallbackBanned
-	}
-	return names
+	// A listing that worked but holds no banned-*.prop is a real answer ("nothing withdrawn yet"), not a failure.
+	return names, true
 }
 
 // refreshBanned merges the maintainer's banned-*.prop files into the remembered denylist. A ban is a
@@ -93,7 +90,12 @@ func (e *Engine) refreshBanned(ctx context.Context) error {
 	e.loadBanned()
 	fresh := map[string]bool{}
 	read := 0
-	for _, name := range e.bannedNames(ctx) {
+	names, listed := e.bannedNames(ctx)
+	if listed && len(names) == 0 {
+		e.pifBannedKnown = true // an authoritative empty list: nothing is withdrawn, remembered bans stay
+		return nil
+	}
+	for _, name := range names {
 		body, err := e.get(ctx, pifArchiveBase+name, pifMaxBytes)
 		if err != nil {
 			continue
@@ -199,7 +201,7 @@ func (e *Engine) pifFindCandidate(ctx context.Context, cur pifFile, curState str
 		}
 		// Dates inside remote content are not believed: they are derived from the build id.
 		cand.Released, cand.Expires = time.Time{}, time.Time{}
-		ok, why := e.pifEligible(cand, cur, curState, time.Now(), pol)
+		ok, why := e.pifEligible(cand, cur, curState, e.now(), pol)
 		if ok {
 			return &cand, ""
 		}
