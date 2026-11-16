@@ -691,22 +691,15 @@ func TestPIFHTTPCooldownDoesNotCoolDownTheKeyboxContour(t *testing.T) {
 	}
 }
 
-func TestPIFWorkHasItsOwnTimeBudgetAndScope(t *testing.T) {
+func TestPIFWorkRunsInItsOwnCooldownScope(t *testing.T) {
 	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
-	var deadline time.Time
 	var scopeSeen string
 	inner := m.e.request
 	m.e.request = func(r *http.Request) (*http.Response, error) {
-		deadline, _ = r.Context().Deadline()
 		scopeSeen = m.e.scope
 		return inner(r)
 	}
-	parent, cancel := context.WithTimeout(context.Background(), time.Hour)
-	defer cancel()
-	m.e.pifMaintain(parent, true)
-	if deadline.IsZero() || time.Until(deadline) > pifBudget+time.Second {
-		t.Fatalf("PIF requests must carry a budget of at most %v, got %v", pifBudget, time.Until(deadline))
-	}
+	m.e.pifMaintain(context.Background(), true)
 	if scopeSeen != pifScope || m.e.scope != "" {
 		t.Fatalf("scope during=%q after=%q", scopeSeen, m.e.scope)
 	}
@@ -744,5 +737,72 @@ func TestStrictContextRefusesToGuessAndStaleTempFilesAreCleaned(t *testing.T) {
 		if _, err := os.Stat(f); err != nil {
 			t.Fatalf("%s must stay: %v", f, err)
 		}
+	}
+}
+
+// A failure AFTER the patch was repaired must put the old fingerprint back and the old patch with it.
+func TestRestoreRealignsThePatchWithTheRestoredFile(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	orig := []byte(octoberPIF)
+	// state in the middle of a failed install: new fingerprint on disk, patch already moved to it
+	if err := os.WriteFile(m.prop, []byte(novemberMeow), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(m.patch, []byte("all=2026-11-05\n"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	m.e.pifRestore(m.prop, orig, false)
+	if m.propText() != octoberPIF || m.patchText() != "all=2026-10-05\n" {
+		t.Fatalf("restored pair: prop ok=%v patch=%q", m.propText() == octoberPIF, m.patchText())
+	}
+	if m.e.status.PIF.PatchPair != "match" {
+		t.Fatalf("pair after restore: %s", m.e.status.PIF.PatchPair)
+	}
+}
+
+func TestInstallRefusesWhileTheWriteLockIsHeld(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	held, err := lock(filepath.Join(m.e.ram, "write.lock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer held.Close()
+	before := m.propText()
+	m.maintain(true)
+	if m.propText() != before || !strings.Contains(m.e.status.PIF.Reason, "write lock busy") || m.restart != 0 {
+		t.Fatalf("an install must not run beside another writer: %q", m.e.status.PIF.Reason)
+	}
+}
+
+// The 45 s budget is seen by the probe (get() adds its own 10 s to every request, so it is not
+// visible on HTTP requests).
+func TestPIFMaintenanceCarriesItsOwnBudgetIntoTheProbe(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	var deadline time.Time
+	m.e.restartGMS = func(ctx context.Context) error {
+		deadline, _ = ctx.Deadline()
+		return nil
+	}
+	parent, cancel := context.WithTimeout(context.Background(), 3*time.Hour)
+	defer cancel()
+	m.e.pifMaintain(parent, true)
+	if deadline.IsZero() || time.Until(deadline) > pifBudget+time.Second || time.Until(deadline) < pifBudget-10*time.Second {
+		t.Fatalf("maintenance must run with ~%v, got %v", pifBudget, time.Until(deadline))
+	}
+}
+
+// A write that is reported as successful but stored something else (torn write, full disk, a
+// racing writer) is caught by the readback: the previous file is restored and nothing restarts.
+func TestInstallDetectsAWriteThatStoredSomethingElse(t *testing.T) {
+	m := newMaintain(t, octoberPIF, "all=2026-10-05\n")
+	m.e.pifWriter = func(path string, data []byte, mode os.FileMode) error {
+		return os.WriteFile(path, data[:len(data)/2], mode) // success, but half the bytes
+	}
+	m.maintain(true)
+	if m.propText() != octoberPIF || m.patchText() != "all=2026-10-05\n" {
+		t.Fatalf("the previous pair must be back:\n%s\npatch %q", m.propText(), m.patchText())
+	}
+	if !strings.Contains(m.e.status.PIF.Reason, "readback differs") || m.restart != 0 || m.e.pifFailures != 1 {
+		t.Fatalf("reason=%q restarts=%d failures=%d", m.e.status.PIF.Reason, m.restart, m.e.pifFailures)
 	}
 }

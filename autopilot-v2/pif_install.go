@@ -165,14 +165,12 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	if _, err = parsePIF(data); err != nil {
 		return errors.New("rendered file invalid: " + err.Error())
 	}
-	restoreAll := func() {
-		if !absent {
-			_ = e.writeMeta(prop, orig, 0644)
-		}
-		f, p := e.pifAudit(true)
-		_ = e.pifSyncPatch(f, p) // realign the patch with the file that is on disk again
+	restoreAll := func() { e.pifRestore(prop, orig, absent) }
+	write := e.writeMeta
+	if e.pifWriter != nil {
+		write = e.pifWriter
 	}
-	if err = e.writeMeta(prop, data, 0644); err != nil {
+	if err = write(prop, data, 0644); err != nil {
 		return err
 	}
 	back, _, err := readOptional(prop, pifMaxBytes)
@@ -194,6 +192,16 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	e.status.PIF.Reason = ""
 	logEvent("pif_installed", "local", 0)
 	return nil
+}
+
+// pifRestore puts the previous fingerprint file back AND realigns security_patch.txt with it: a
+// failure after the patch was already repaired must not leave the pair split.
+func (e *Engine) pifRestore(prop string, orig []byte, absent bool) {
+	if !absent {
+		_ = e.writeMeta(prop, orig, 0644)
+	}
+	f, p := e.pifAudit(true)
+	_ = e.pifSyncPatch(f, p)
 }
 
 func (e *Engine) restartPlayServices(ctx context.Context) error {
