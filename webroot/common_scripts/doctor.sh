@@ -4,7 +4,7 @@
 # the engine uses (open an existing file for append, close without writing).
 # Prints "LEVEL name detail" lines (OK/WARN/FAIL) and exits 1 if any check FAILed.
 # Test overrides: AP_KEYBOX AP_MODULES AP_BRAIN AP_CONF AP_ENGINE AP_LOGCAT AP_LOG
-#                 AP_NOW AP_NO_PROBE AP_SETTLE
+#                 AP_NOW AP_NO_PROBE AP_SETTLE AP_PIF AP_PATCH AP_TODAY
 set -u
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd) || exit 1
@@ -350,11 +350,157 @@ check_engine() {
     esac
 }
 
+# ---- PIF fingerprint and the Tricky Store patch (Law 15) ----
+# The attestation triplet is key + fingerprint + patch. The keybox checks above cannot see a
+# fingerprint that expired or a patch that disagrees with it; both turn DEVICE integrity red
+# while everything else looks healthy (incident 2026-11-16).
+PIFPROP=${AP_PIF:-$MODULES/playintegrityfix/custom.pif.prop}
+PATCHFILE=${AP_PATCH:-$KDIR/security_patch.txt}
+
+# Prints one line: "OK|ERR reason id patch expiry released fingerprint" (unknown values are "-").
+pif_summary() {
+    awk '
+        function dn(s,   t, y, m, d) {
+            split(s, t, "-"); y = t[1] + 0; m = t[2] + 0; d = t[3] + 0
+            if (m <= 2) { y--; m += 12 }
+            return int(365.25 * y) + int(30.6001 * (m + 1)) + d
+        }
+        function bad(why) { print "ERR " why " - - - - -"; done = 1; exit }
+        {
+            line = $0; sub(/\r$/, "", line)
+            if (line ~ /^[ \t]*# Configuration[ \t]*$/) inconf = 1
+            if (match(line, /^#[ \t]*Estimated Expiry:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) {
+                e = substr(line, RSTART, RLENGTH); sub(/^#[ \t]*Estimated Expiry:[ \t]*/, "", e); expiry = e; next
+            }
+            if (match(line, /^#[ \t]*Canary Released:[ \t]*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]/)) {
+                e = substr(line, RSTART, RLENGTH); sub(/^#[ \t]*Canary Released:[ \t]*/, "", e); released = e; next
+            }
+            if (inconf) next
+            if (line ~ /^[ \t]*(#|$)/) next
+            eq = index(line, "="); if (eq == 0) next
+            k = substr(line, 1, eq - 1); v = substr(line, eq + 1); gsub(/^[ \t]+|[ \t]+$/, "", v)
+            if (k in P) bad("duplicate_" k)
+            P[k] = v
+        }
+        END {
+            if (done) exit
+            n = split("MANUFACTURER MODEL FINGERPRINT BRAND PRODUCT DEVICE RELEASE ID INCREMENTAL TYPE TAGS SECURITY_PATCH", req, " ")
+            for (i = 1; i <= n; i++) if (P[req[i]] == "") bad("missing_" req[i])
+            if (split(P["FINGERPRINT"], a, "/") != 6) bad("fingerprint_shape")
+            split(a[3], dr, ":"); split(a[5], it, ":")
+            if (tolower(a[1]) != tolower(P["BRAND"])) bad("fingerprint_vs_BRAND")
+            if (a[2] != P["PRODUCT"]) bad("fingerprint_vs_PRODUCT")
+            if (dr[1] != P["DEVICE"]) bad("fingerprint_vs_DEVICE")
+            if (dr[2] != P["RELEASE"]) bad("fingerprint_vs_RELEASE")
+            if (a[4] != P["ID"]) bad("fingerprint_vs_ID")
+            if (it[1] != P["INCREMENTAL"]) bad("fingerprint_vs_INCREMENTAL")
+            if (it[2] != P["TYPE"]) bad("fingerprint_vs_TYPE")
+            if (a[6] != P["TAGS"]) bad("fingerprint_vs_TAGS")
+            if (P["SECURITY_PATCH"] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) bad("SECURITY_PATCH_format")
+            print "OK - " P["ID"] " " P["SECURITY_PATCH"] " " (expiry == "" ? "-" : expiry) " " (released == "" ? "-" : released) " " P["FINGERPRINT"]
+        }' "$1"
+}
+
+# Prints "kind value": all|date|system|stock|none|unknown.
+patch_summary() {
+    [ -f "$1" ] || { echo "none -"; return 0; }
+    awk '
+        { line = $0; gsub(/[ \t\r]/, "", line)
+          if (line == "" || substr(line, 1, 1) == "#") next
+          if (line ~ /^all=[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) { all = substr(line, 5); next }
+          if (line ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) { date = line; next }
+          if (line ~ /^[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]$/) { date = substr(line, 1, 4) "-" substr(line, 5, 2) "-" substr(line, 7, 2); next }
+          if (line ~ /^system=[0-9][0-9][0-9][0-9][0-9][0-9]$/) { sys = substr(line, 8, 4) "-" substr(line, 12, 2); next }
+          if (line == "system=prop" || line == "all=prop") stock = 1
+        }
+        END {
+            if (all != "") print "all " all
+            else if (date != "") print "date " date
+            else if (sys != "") print "system " sys
+            else if (stock) print "stock -"
+            else print "unknown -"
+        }' "$1"
+}
+
+# Day number of YYYY-MM-DD (portable, monotonic): used only to compare dates.
+day_number() {
+    printf '%s\n' "$1" | awk '{ split($0, t, "-"); y = t[1] + 0; m = t[2] + 0; d = t[3] + 0
+        if (m <= 2) { y--; m += 12 } print int(365.25 * y) + int(30.6001 * (m + 1)) + d }'
+}
+
+check_pif() {
+    [ -d "$MODULES/playintegrityfix" ] || [ -n "${AP_PIF:-}" ] || return 0
+    if [ ! -f "$PIFPROP" ]; then
+        report WARN pif-format "custom.pif.prop missing (the module may use another fingerprint source)"
+        return 0
+    fi
+    # shellcheck disable=SC2046 # the helper prints space-separated fields on purpose
+    set -- $(pif_summary "$PIFPROP")
+    if [ "$1" != OK ]; then
+        report FAIL pif-format "$2"
+        return 0
+    fi
+    pid=$3 ppatch=$4 pexp=$5 prel=$6 pfp=$7
+    report OK pif-format "$pid patch $ppatch"
+    today=${AP_TODAY:-$(date +%Y-%m-%d)}
+    life=$(conf_int pif_lifetime_days 14 90 42)
+    est=""
+    if [ "$pexp" = - ] && [ "$prel" != - ]; then
+        # Same rule as the engine: no explicit expiry means release + lifetime.
+        left=$(( $(day_number "$prel") + life - $(day_number "$today") ))
+        est=" (estimated: release $prel + $life days)"
+    elif [ "$pexp" != - ]; then
+        left=$(( $(day_number "$pexp") - $(day_number "$today") ))
+    fi
+    if [ "$pexp" = - ] && [ "$prel" = - ]; then
+        report WARN pif-expiry "no 'Estimated Expiry' or 'Canary Released' comment: the end of life of this fingerprint is unknown"
+    else
+        [ "$pexp" != - ] || pexp="~$(( life ))d after $prel"
+        if [ "$left" -le 0 ]; then
+            report FAIL pif-expiry "fingerprint expired on $pexp$est: Play Integrity will fail DEVICE once Google retires the build"
+        elif [ "$left" -le 3 ]; then
+            report WARN pif-expiry "expires $pexp (in $left day(s))$est: renew the fingerprint"
+        else
+            report OK pif-expiry "expires $pexp (in $left days)$est"
+        fi
+    fi
+    # shellcheck disable=SC2046 # the helper prints space-separated fields on purpose
+    set -- $(patch_summary "$PATCHFILE")
+    kind=$1 pval=$2
+    case "$kind" in
+        none) report WARN patch-pair "security_patch.txt missing" ;;
+        stock) report OK patch-pair "stock patch mode (system=prop): not spoofed on purpose" ;;
+        unknown) report WARN patch-pair "security_patch.txt has no recognizable patch value" ;;
+        system)
+            case "$ppatch" in
+                "$pval"-*) report OK patch-pair "month $pval matches PIF patch $ppatch" ;;
+                *) report FAIL patch-pair "Tricky Store patch month $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)" ;;
+            esac ;;
+        *)
+            if [ "$pval" = "$ppatch" ]; then
+                report OK patch-pair "Tricky Store patch equals PIF patch $ppatch"
+            else
+                report FAIL patch-pair "Tricky Store patch $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)"
+            fi ;;
+    esac
+    if have "$LOGCAT"; then
+        applied=$("$LOGCAT" -d 2>/dev/null | grep 'PIF/Java:DG: \[FINGERPRINT\]' | tail -n 1 | sed -n 's/.*-> *//p')
+        if [ -z "$applied" ]; then
+            report WARN pif-applied "no fingerprint spoof line in the log (log rotated, or Play Services not restarted yet)"
+        elif [ "$applied" = "$pfp" ]; then
+            report OK pif-applied "last Play Services start used this fingerprint"
+        else
+            report WARN pif-applied "Play Services last spoofed a different fingerprint: restart com.google.android.gms.unstable"
+        fi
+    fi
+}
+
 if check_tools; then
     check_consumer
     check_keybox
     check_probe
 fi
+check_pif
 check_engine
 printf 'SUMMARY fail=%s warn=%s\n' "$FAILS" "$WARNS"
 [ "$FAILS" -eq 0 ]

@@ -280,4 +280,126 @@ while IFS= read -r line; do
     esac
 done < "$W/good/leaf.priv"
 
+# 12. PIF fingerprint and patch pair (Law 15). A fixture is a copy of the healthy keybox dir.
+NOV_FP='google/bluejay_beta/bluejay:CANARY/ZP11.261016.008/16754936:user/release-keys'
+pif_text() { # PATCH [EXPIRY|none] [ID] [EXTRA_LINE]
+    printf 'MANUFACTURER=Google\nMODEL=Pixel 6a\nFINGERPRINT=google/bluejay_beta/bluejay:CANARY/%s/16754936:user/release-keys\nBRAND=google\nPRODUCT=bluejay_beta\nDEVICE=bluejay\nRELEASE=CANARY\nID=%s\nINCREMENTAL=16754936\nTYPE=user\nTAGS=release-keys\nSECURITY_PATCH=%s\nDEVICE_INITIAL_SDK_INT=32\n' "${3:-ZP11.261016.008}" "${3:-ZP11.261016.008}" "$1"
+    printf '\n# Configuration\nspoofBuild=1\nverboseLogs=0\n'
+    [ "${2:-none}" = none ] || printf '\n# Estimated Expiry: %s\n' "$2"
+    [ -z "${4:-}" ] || printf '%s\n' "$4"
+}
+make_pif() { # NAME PIF_TEXT PATCH_TEXT(or "-" for no file)
+    rm -rf "$W/$1"; cp -R "$W/good" "$W/$1"
+    mkdir -p "$W/$1/modules/playintegrityfix"
+    printf '%s' "$2" > "$W/$1/modules/playintegrityfix/custom.pif.prop"
+    [ "$3" = - ] || printf '%s' "$3" > "$W/$1/tricky_store/security_patch.txt"
+}
+
+# 12a. Healthy pair: exit 0, all four checks OK.
+make_pif pif_ok "$(pif_text 2026-11-05 2026-12-20)
+" "all=2026-11-05
+"
+printf 'PIF/Java:DG: [FINGERPRINT]: Xiaomi/dipper/old -> %s\n' "$NOV_FP" >> "$W/log.txt"
+run_doctor pif_ok AP_TODAY=2026-11-16
+[ "$RC" -eq 0 ] || { printf '%s\n' "$OUT" >&2; fail "healthy PIF pair exited $RC"; }
+contains "$OUT" "OK   pif-format"
+contains "$OUT" "ZP11.261016.008 patch 2026-11-05"
+contains "$OUT" "OK   pif-expiry"
+contains "$OUT" "in 34 days"
+contains "$OUT" "OK   patch-pair"
+contains "$OUT" "OK   pif-applied"
+contains "$OUT" "SUMMARY fail=0"
+
+# 12b. THE INCIDENT: PIF 2026-11-05, Tricky Store all=2026-10-05 -> FAIL, exit 1.
+make_pif pif_incident "$(pif_text 2026-11-05 2026-12-20)
+" "all=2026-10-05
+"
+run_doctor pif_incident AP_TODAY=2026-11-16
+[ "$RC" -eq 1 ] || { printf '%s\n' "$OUT" >&2; fail "patch mismatch must exit 1, got $RC"; }
+contains "$OUT" "FAIL patch-pair"
+contains "$OUT" "Tricky Store patch 2026-10-05 differs from PIF patch 2026-11-05"
+
+# 12c. Other patch file layouts.
+make_pif pif_date8 "$(pif_text 2026-11-05 2026-12-20)
+" "20261105
+"
+run_doctor pif_date8 AP_TODAY=2026-11-16; contains "$OUT" "OK   patch-pair"
+make_pif pif_dash "$(pif_text 2026-11-05 2026-12-20)
+" "2026-10-05
+"
+run_doctor pif_dash AP_TODAY=2026-11-16; contains "$OUT" "FAIL patch-pair"
+make_pif pif_sysok "$(pif_text 2026-11-05 2026-12-20)
+" "system=202611
+"
+run_doctor pif_sysok AP_TODAY=2026-11-16; contains "$OUT" "month 2026-11 matches"
+make_pif pif_sysbad "$(pif_text 2026-11-05 2026-12-20)
+" "system=202610
+"
+run_doctor pif_sysbad AP_TODAY=2026-11-16; contains "$OUT" "FAIL patch-pair"
+make_pif pif_stock "$(pif_text 2026-11-05 2026-12-20)
+" "system=prop
+"
+run_doctor pif_stock AP_TODAY=2026-11-16; contains "$OUT" "OK   patch-pair"; contains "$OUT" "stock patch mode"
+make_pif pif_nofile "$(pif_text 2026-11-05 2026-12-20)
+" -
+run_doctor pif_nofile AP_TODAY=2026-11-16; contains "$OUT" "WARN patch-pair"
+make_pif pif_junk "$(pif_text 2026-11-05 2026-12-20)
+" "boot=whatever
+"
+run_doctor pif_junk AP_TODAY=2026-11-16; contains "$OUT" "WARN patch-pair"
+make_pif pif_crlf "$(pif_text 2026-11-05 2026-12-20 | sed 's/$/\r/')
+" "all=2026-11-05
+"
+run_doctor pif_crlf AP_TODAY=2026-11-16; contains "$OUT" "OK   pif-format"; contains "$OUT" "OK   patch-pair"
+
+# 12d. Expiry: expired, expiring soon, boundary, unknown.
+run_doctor pif_ok AP_TODAY=2026-12-20; contains "$OUT" "FAIL pif-expiry"
+run_doctor pif_ok AP_TODAY=2026-12-21; contains "$OUT" "FAIL pif-expiry"
+run_doctor pif_ok AP_TODAY=2026-12-17; contains "$OUT" "WARN pif-expiry"; contains "$OUT" "in 3 day"
+run_doctor pif_ok AP_TODAY=2026-12-16; contains "$OUT" "OK   pif-expiry"
+make_pif pif_noexp "$(pif_text 2026-11-05 none)
+" "all=2026-11-05
+"
+run_doctor pif_noexp AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-expiry"; contains "$OUT" "unknown"
+# "Canary Released" without an explicit expiry: release + 42 days (same as the engine), policy-tunable
+make_pif pif_rel "$(pif_text 2026-11-05 none ZP11.261016.008 '# Canary Released: 2026-10-16')
+" "all=2026-11-05
+"
+run_doctor pif_rel AP_TODAY=2026-11-16; contains "$OUT" "OK   pif-expiry"; contains "$OUT" "release 2026-10-16 + 42 days"; contains "$OUT" "in 11 days"
+run_doctor pif_rel AP_TODAY=2026-11-27; contains "$OUT" "FAIL pif-expiry"
+printf 'pif_lifetime_days = 60\n' > "$W/pif_rel/brain/autopilot.conf"
+run_doctor pif_rel AP_TODAY=2026-11-16 AP_CONF="$W/pif_rel/brain/autopilot.conf"; contains "$OUT" "release 2026-10-16 + 60 days"; contains "$OUT" "in 29 days"
+
+# 12e. Format errors: each must FAIL with its own reason.
+for pair in 'ID=ZP11.261016.008:ID=ZP11.260918.007:fingerprint_vs_ID' 'PRODUCT=bluejay_beta:PRODUCT=cubs_beta:fingerprint_vs_PRODUCT' \
+            'SECURITY_PATCH=2026-11-05:SECURITY_PATCH=2026-11:SECURITY_PATCH_format' 'MODEL=Pixel 6a:MODEL=:missing_MODEL'; do
+    from=${pair%%:*}; rest=${pair#*:}; to=${rest%%:*}; why=${rest#*:}
+    make_pif pif_bad "$(pif_text 2026-11-05 2026-12-20 | sed "s/^$from\$/$to/")
+" "all=2026-11-05
+"
+    run_doctor pif_bad AP_TODAY=2026-11-16
+    contains "$OUT" "FAIL pif-format"; contains "$OUT" "$why"
+done
+make_pif pif_dup "$(pif_text 2026-11-05 2026-12-20 ZP11.261016.008 'MODEL=Other')
+" "all=2026-11-05
+"
+# a key after "# Configuration" belongs to the module's configuration, not to the fingerprint
+run_doctor pif_dup AP_TODAY=2026-11-16; contains "$OUT" "OK   pif-format"
+
+# 12f. pif-applied: other fingerprint spoofed last, and no line at all.
+make_pif pif_old "$(pif_text 2026-11-05 2026-12-20)
+" "all=2026-11-05
+"
+: > "$W/log.txt"; printf 'PIF/Java:DG: [FINGERPRINT]: a -> google/cubs_beta/cubs:CANARY/ZP11.260918.007/16484274:user/release-keys\n' >> "$W/log.txt"
+run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; contains "$OUT" "different fingerprint"
+: > "$W/log.txt"
+run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; contains "$OUT" "no fingerprint spoof line"
+
+# 12g. Without the module the checks are silent (no new noise for plain Tricky Store setups); read-only.
+run_doctor good AP_TODAY=2026-11-16; lacks "$OUT" "pif-"; lacks "$OUT" "patch-pair"
+b1=$(cksum < "$W/pif_incident/modules/playintegrityfix/custom.pif.prop"); b2=$(cksum < "$W/pif_incident/tricky_store/security_patch.txt")
+run_doctor pif_incident AP_TODAY=2026-11-16
+[ "$b1" = "$(cksum < "$W/pif_incident/modules/playintegrityfix/custom.pif.prop")" ] && [ "$b2" = "$(cksum < "$W/pif_incident/tricky_store/security_patch.txt")" ] || fail "doctor modified the PIF files"
+ok
+
 printf 'doctor tests PASS (%s assertions)\n' "$PASS"

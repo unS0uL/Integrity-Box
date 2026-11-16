@@ -20,6 +20,7 @@ type Status struct {
 	Phase           string         `json:"phase"`
 	Local           Health         `json:"local"`
 	Consumer        ConsumerStatus `json:"consumer"`
+	PIF             PIFStatus      `json:"pif"`
 	Revocation      string         `json:"revocation_state"`
 	Integrity       string         `json:"integrity_verdict"`
 	Reason          string         `json:"reason"`

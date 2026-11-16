@@ -24,6 +24,25 @@ type Policy struct {
 	ProbeSettle     time.Duration
 	ExtraHosts      []string
 	Consumer        ConsumerOverride
+	PIF             PIFPolicy
+}
+
+// PIFPolicy tunes the fingerprint contour (pif*.go). Mode "off" disables the contour entirely,
+// "manual" only reports (no writes), "auto" repairs the patch pair and replaces bad fingerprints.
+type PIFPolicy struct {
+	Mode         string
+	RenewBefore  time.Duration
+	FollowLatest bool
+	SyncPatch    bool
+	Probe        bool
+	ProbeWait    time.Duration
+	Lifetime     time.Duration
+	Sources      []string
+}
+
+func defaultPIFPolicy() PIFPolicy {
+	return PIFPolicy{Mode: "auto", RenewBefore: 72 * time.Hour, SyncPatch: true, Probe: true, ProbeWait: 15 * time.Second,
+		Lifetime: 42 * 24 * time.Hour, Sources: []string{"archive"}}
 }
 
 // ConsumerOverride replaces fields of the built-in Tricky Store description.
@@ -53,6 +72,7 @@ func defaultPolicy() Policy {
 		RenewBefore:     24 * time.Hour,
 		ProbeInterval:   6 * time.Hour,
 		ProbeSettle:     5 * time.Second,
+		PIF:             defaultPIFPolicy(),
 	}
 }
 
@@ -64,6 +84,17 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+func onOff(key, value string, current bool, note func(string, ...any)) bool {
+	switch strings.ToLower(value) {
+	case "on", "true", "1", "yes":
+		return true
+	case "off", "false", "0", "no":
+		return false
+	}
+	note("%s: use on or off", key)
+	return current
 }
 
 func validSourceName(s string) bool {
@@ -138,6 +169,37 @@ func parsePolicy(text string) (Policy, []string) {
 			}
 			if len(list) > 0 {
 				p.SourcePriority = list
+			}
+		case "pif_mode":
+			switch strings.ToLower(value) {
+			case "auto", "manual", "off":
+				p.PIF.Mode = strings.ToLower(value)
+			default:
+				note("pif_mode: use auto, manual or off")
+			}
+		case "pif_renew_before_hours":
+			p.PIF.RenewBefore = time.Duration(number(key, value, 24, 336, int(p.PIF.RenewBefore/time.Hour))) * time.Hour
+		case "pif_lifetime_days":
+			p.PIF.Lifetime = time.Duration(number(key, value, 14, 90, int(p.PIF.Lifetime/(24*time.Hour)))) * 24 * time.Hour
+		case "pif_probe_wait_seconds":
+			p.PIF.ProbeWait = time.Duration(number(key, value, 5, 30, int(p.PIF.ProbeWait/time.Second))) * time.Second
+		case "pif_follow_latest":
+			p.PIF.FollowLatest = onOff(key, value, p.PIF.FollowLatest, note)
+		case "pif_sync_patch":
+			p.PIF.SyncPatch = onOff(key, value, p.PIF.SyncPatch, note)
+		case "pif_probe":
+			p.PIF.Probe = onOff(key, value, p.PIF.Probe, note)
+		case "pif_sources":
+			list := []string{}
+			for _, s := range splitList(strings.ToLower(value)) {
+				if s == "archive" || s == "google" {
+					list = append(list, s)
+				} else {
+					note("pif_sources: %q ignored (archive, google)", s)
+				}
+			}
+			if len(list) > 0 {
+				p.PIF.Sources = list
 			}
 		case "extra_hosts":
 			list := []string{}
@@ -257,6 +319,16 @@ func (e *Engine) sourcePriority() []string {
 	}
 	return defaultPolicy().SourcePriority
 }
+
+// pifPolicy returns the effective fingerprint policy; an Engine without a loaded policy
+// (unit tests, first cycle) gets the defaults.
+func (e *Engine) pifPolicy() PIFPolicy {
+	if e.policy.PIF.Mode == "" {
+		return defaultPIFPolicy()
+	}
+	return e.policy.PIF
+}
+
 func (e *Engine) renewBefore() time.Duration {
 	if e.policy.RenewBefore > 0 {
 		return e.policy.RenewBefore

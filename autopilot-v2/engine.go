@@ -32,6 +32,7 @@ type Engine struct {
 	searched          bool
 	lastSearchBoot    float64
 	urgentEvidence    string
+	pifBanned         map[string]bool // denylisted fingerprint ids and strings (RAM, rebuilt from the source)
 	// Consumer verification. Zero values keep the legacy behaviour (used by unit tests).
 	modulesRoot          string
 	logs                 logChannel

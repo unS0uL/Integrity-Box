@@ -65,6 +65,12 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		return errors.New("anchor metadata unavailable; current file preserved")
 	}
 	e.auditConsumer(ctx, !e.dryRun)
+	// The fingerprint contour is independent of the keybox contour: a failure here is logged and
+	// never blocks (or is blocked by) the key. Patch repair needs no network and no clock.
+	pifFile, pifPatch := e.pifAudit(e.status.TimeState == "verified")
+	if er := e.pifSyncPatch(pifFile, pifPatch); er != nil {
+		logEvent("pif_cycle_error", "local", 0)
+	}
 	if e.requireConsumer && !e.status.Consumer.Present {
 		e.status.Phase = "required_consumer_missing"
 		return errors.New("required keybox consumer is not installed")
@@ -445,6 +451,9 @@ func (e *Engine) daemon(ctx context.Context) error {
 			if !audit.IsZero() && audit.Before(next) {
 				next = audit
 			}
+		}
+		if d := e.pifDeadline(); !d.IsZero() && d.Before(next) {
+			next = d
 		}
 		nextBoot = e.uptime() + time.Until(next).Seconds()
 		if e.status.Revocation == "fresh" {

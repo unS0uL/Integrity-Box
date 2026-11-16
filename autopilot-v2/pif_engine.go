@@ -1,0 +1,234 @@
+package main
+
+import (
+	"bytes"
+	"errors"
+	"os"
+	"path/filepath"
+	"syscall"
+	"time"
+)
+
+// PIFStatus is the "pif" block of status.json.
+type PIFStatus struct {
+	State       string    `json:"state"` // absent|invalid|banned|expired|expiring|ok
+	Mode        string    `json:"mode"`
+	ID          string    `json:"id,omitempty"`
+	Incremental string    `json:"incremental,omitempty"`
+	Fingerprint string    `json:"fingerprint,omitempty"`
+	Patch       string    `json:"patch,omitempty"`
+	PatchFile   string    `json:"patch_file,omitempty"`
+	PatchPair   string    `json:"patch_pair"` // match|mismatch|stock|missing|unknown|n/a
+	Released    string    `json:"released,omitempty"`
+	Expires     string    `json:"expires,omitempty"`
+	Applied     string    `json:"applied"` // accepted|rejected|unknown|not_probed
+	Evidence    string    `json:"evidence,omitempty"`
+	Action      string    `json:"action,omitempty"` // last action: patch_synced, installed, none
+	Reason      string    `json:"reason,omitempty"`
+	Checked     time.Time `json:"checked"`
+}
+
+func (e *Engine) pifPropPath() string {
+	if e.moduleRoot == "" {
+		return ""
+	}
+	return filepath.Join(e.moduleRoot, "custom.pif.prop")
+}
+
+func (e *Engine) patchPath() string { return filepath.Join(e.root, "security_patch.txt") }
+
+func (e *Engine) pifActive() bool {
+	return e.pifPropPath() != "" && e.pifPolicy().Mode != "off"
+}
+
+// classifyPIF is pure so the decision table can be tested exhaustively.
+func classifyPIF(f pifFile, perr error, absent bool, now time.Time, timeOK bool, pol PIFPolicy, banned map[string]bool) string {
+	switch {
+	case absent:
+		return "absent"
+	case perr != nil:
+		return "invalid"
+	case banned[f.Props["ID"]] || banned[f.Props["FINGERPRINT"]]:
+		return "banned"
+	}
+	if exp := f.expiry(pol.Lifetime); timeOK && !exp.IsZero() {
+		if !now.Before(exp) {
+			return "expired"
+		}
+		if exp.Sub(now) < pol.RenewBefore {
+			return "expiring"
+		}
+	}
+	return "ok"
+}
+
+func readOptional(path string, limit int64) ([]byte, bool, error) {
+	b, err := readLimited(path, limit)
+	if os.IsNotExist(err) {
+		return nil, true, nil
+	}
+	return b, false, err
+}
+
+// pifAudit reads both files and fills status.PIF. It never writes and never needs the network.
+// timeOK says whether the clock is verified; without it expiry is not judged (fail closed).
+func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
+	pol := e.pifPolicy()
+	st := PIFStatus{Mode: pol.Mode, PatchPair: "n/a", Applied: e.status.PIF.Applied, Evidence: e.status.PIF.Evidence,
+		Action: e.status.PIF.Action, Checked: time.Now()}
+	if st.Applied == "" {
+		st.Applied = "not_probed"
+	}
+	defer func() { e.status.PIF = st }()
+	if !e.pifActive() {
+		st.State = "off"
+		return pifFile{}, patchFile{Kind: "none"}
+	}
+	raw, absent, rerr := readOptional(e.pifPropPath(), pifMaxBytes)
+	var f pifFile
+	var perr error
+	if !absent {
+		perr = rerr
+		if perr == nil {
+			f, perr = parsePIF(raw)
+		}
+	}
+	st.State = classifyPIF(f, perr, absent, time.Now(), timeOK, pol, e.pifBanned)
+	if perr != nil {
+		st.Reason = perr.Error()
+	}
+	var pf patchFile
+	if perr == nil && !absent {
+		st.ID, st.Incremental, st.Fingerprint, st.Patch = f.Props["ID"], f.Props["INCREMENTAL"], f.Props["FINGERPRINT"], f.Props["SECURITY_PATCH"]
+		if !f.Released.IsZero() {
+			st.Released = f.Released.Format("2006-01-02")
+		}
+		if exp := f.expiry(pol.Lifetime); !exp.IsZero() {
+			st.Expires = exp.Format("2006-01-02")
+		}
+		pb, pAbsent, perr2 := readOptional(e.patchPath(), 4096)
+		switch {
+		case perr2 != nil:
+			pf = patchFile{Kind: "unknown"}
+		case pAbsent:
+			pf = patchFile{Kind: "none"}
+		default:
+			pf = parsePatchFile(pb)
+		}
+		st.PatchFile = pf.Value
+		st.PatchPair = pf.pair(f.patch())
+	}
+	return f, pf
+}
+
+// pifSyncPatch repairs invariant I-PATCH without any network access: security_patch.txt is
+// derived from the active fingerprint. Only a clear mismatch is touched; stock mode
+// (system=prop), a missing or unreadable file are left alone.
+func (e *Engine) pifSyncPatch(f pifFile, pf patchFile) error {
+	pol := e.pifPolicy()
+	if !e.pifActive() || pol.Mode != "auto" || !pol.SyncPatch || e.dryRun {
+		return nil
+	}
+	if e.status.PIF.State == "absent" || e.status.PIF.State == "invalid" || e.status.PIF.PatchPair != "mismatch" {
+		return nil
+	}
+	orig, absent, err := readOptional(e.patchPath(), 4096)
+	if err != nil || absent {
+		return err
+	}
+	want := pf.withPatch(orig, f.patch())
+	if bytes.Equal(want, orig) {
+		return nil
+	}
+	if err = e.writeMeta(e.patchPath(), want, 0644); err != nil {
+		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()
+		logEvent("pif_patch_sync_failed", "local", 0)
+		return err
+	}
+	// Prove it by reading the file back (never trust the write call).
+	back, _, err := readOptional(e.patchPath(), 4096)
+	if err != nil || !bytes.Equal(back, want) {
+		return errors.New("patch file readback differs")
+	}
+	e.status.PIF.PatchPair = parsePatchFile(back).pair(f.patch())
+	e.status.PIF.PatchFile = parsePatchFile(back).Value
+	e.status.PIF.Action = "patch_synced"
+	logEvent("pif_patch_synced", "local", 0)
+	return nil
+}
+
+// writeMeta atomically replaces path keeping owner, group, mode (default defMode for a new
+// file) and the SELinux context of the file it replaces. No copy of the old content remains.
+func (e *Engine) writeMeta(path string, data []byte, defMode os.FileMode) error {
+	uid, gid, mode, context := os.Getuid(), os.Getgid(), defMode, ""
+	if st, err := os.Lstat(path); err == nil {
+		if !st.Mode().IsRegular() {
+			return errors.New("target is not a regular file")
+		}
+		mode = st.Mode().Perm()
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			uid, gid = int(sys.Uid), int(sys.Gid)
+		}
+		if c, cerr := fileContext(path); cerr == nil {
+			context = c
+		}
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+	f, err := os.CreateTemp(filepath.Dir(path), ".autopilot-pif-")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	ok := false
+	defer func() {
+		f.Close()
+		if !ok {
+			os.Remove(name)
+		}
+	}()
+	if _, err = f.Write(data); err != nil {
+		return err
+	}
+	if err = f.Chown(uid, gid); err != nil {
+		return err
+	}
+	if err = f.Chmod(mode); err != nil {
+		return err
+	}
+	if context != "" {
+		if err = label(name, context); err != nil {
+			return err
+		}
+	}
+	if err = f.Sync(); err != nil {
+		return err
+	}
+	if err = f.Close(); err != nil {
+		return err
+	}
+	if err = os.Rename(name, path); err != nil {
+		return err
+	}
+	ok = true
+	return syncDir(filepath.Dir(path))
+}
+
+// pifDeadline is the next time the daemon should look at the fingerprint again (zero = no need).
+func (e *Engine) pifDeadline() time.Time {
+	if !e.pifActive() {
+		return time.Time{}
+	}
+	s := e.status.PIF
+	if s.State == "banned" || s.State == "expired" || s.State == "invalid" || s.PatchPair == "mismatch" {
+		return time.Now().Add(30 * time.Minute)
+	}
+	if t, err := time.Parse("2006-01-02", s.Expires); err == nil {
+		d := t.Add(-e.pifPolicy().RenewBefore)
+		if d.After(time.Now()) {
+			return d
+		}
+		return time.Now().Add(30 * time.Minute)
+	}
+	return time.Time{}
+}
