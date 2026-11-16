@@ -842,7 +842,7 @@ func TestPlayServicesRestartKillsThenRespawnsDroidGuard(t *testing.T) {
 	if err := e.restartPlayServices(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"killall com.google.android.gms.unstable",
+	want := []string{"killall com.google.android.gms.unstable", "killall com.google.android.gms", "killall com.android.vending",
 		"am startservice -n com.google.android.gms/.droidguard.DroidGuardService -a com.google.android.gms.droidguard.service.PING"}
 	if strings.Join(calls, "|") != strings.Join(want, "|") {
 		t.Fatalf("commands %q, want %q", calls, want)
@@ -852,7 +852,7 @@ func TestPlayServicesRestartKillsThenRespawnsDroidGuard(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls = nil
-	if err := e.restartPlayServices(ctx); err == nil || len(calls) != 1 {
+	if err := e.restartPlayServices(ctx); err == nil || len(calls) != 3 {
 		t.Fatalf("cancelled restart: err=%v calls=%q", err, calls)
 	}
 }

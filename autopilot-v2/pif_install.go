@@ -225,6 +225,8 @@ func (e *Engine) pifRestore(prop string, orig []byte, absent bool) {
 	_ = e.pifSyncPatch(f, p)
 }
 
+var pifPlayProcesses = []string{"com.google.android.gms.unstable", "com.google.android.gms", "com.android.vending"}
+
 const (
 	pifDroidGuard     = "com.google.android.gms/.droidguard.DroidGuardService"
 	pifDroidGuardPing = "com.google.android.gms.droidguard.service.PING"
@@ -234,7 +236,7 @@ const (
 var pifRespawnDelay = 500 * time.Millisecond
 
 // restartPlayServices makes Play Services run DroidGuard again with the new fingerprint: kill the
-// DroidGuard process, then ask Android to start its service so the process comes back NOW (a plain
+// DroidGuard, Play Services and Play Store processes, then ask Android to start its service so the process comes back NOW (a plain
 // kill, which killpi.sh and Integrity Box's restart_google_services do, leaves it dead until some
 // app happens to use DroidGuard, so nothing is spoofed or logged for a long time). The PING intent
 // is the one DroidGuardService itself declares. One `am` call = one JVM start: acceptable, it runs
@@ -249,7 +251,13 @@ func (e *Engine) restartPlayServices(ctx context.Context) error {
 			return exec.CommandContext(ctx, name, args...).Run()
 		}
 	}
-	_ = run(ctx, "killall", "com.google.android.gms.unstable") // non-zero when it was not running: fine
+	// The same three processes the module's own restart_google_services kills: Play Services and the Play
+	// Store may keep an attestation built with the previous fingerprint (observed on the phone: after a
+	// short window with a wrong file DEVICE stayed red until all three were restarted, killing only the
+	// DroidGuard process was not enough).
+	for _, proc := range pifPlayProcesses {
+		_ = run(ctx, "killall", proc) // non-zero when it was not running: fine
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()

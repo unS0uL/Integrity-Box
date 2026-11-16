@@ -53,6 +53,7 @@ M = [
     ("failed listing marks the denylist known", 'pif_source.go', '	if listed {\n		e.pifBannedKnown = true\n	}', '	e.pifBannedKnown = true'),
     ("refresh has no own budget", 'pif_install.go', 'refreshCtx, stop := context.WithTimeout(ctx, pifRefreshBudget)', 'refreshCtx, stop := context.WithCancel(ctx)'),
     ("sync failures not counted", 'pif_engine.go', '		e.pifSyncFails++\n		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()', '		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()'),
+    ("only DroidGuard is killed", 'pif_install.go', 'var pifPlayProcesses = []string{"com.google.android.gms.unstable", "com.google.android.gms", "com.android.vending"}', 'var pifPlayProcesses = []string{"com.google.android.gms.unstable"}'),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
 
