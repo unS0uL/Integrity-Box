@@ -4,14 +4,17 @@ import subprocess
 import sys
 
 D = sys.argv[1].rstrip('/') + '/'
-FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go', 'reconcile.go', 'clock.go']
+FILES = ['pif.go', 'pif_engine.go', 'pif_install.go', 'pif_source.go', 'pif_google.go', 'transport.go', 'reconcile.go', 'clock.go',
+         '../pif_policy.sh', '../webroot/common_scripts/doctor.sh']
+SHELL_TESTS = {'policy': 'test_pif_policy.sh', 'doctor': 'test_doctor.sh'}   # runner name -> script in this directory
 ORIG = {f: open(D + f).read() for f in FILES}
 # The month-long simulations are slow (~35 s): only mutations of timing/backoff/denylist-state logic run them.
 LIFE = {'unverified clock polls every 30 min', 'failed listing marks the denylist known', 'empty listing not known', 'denylist backoff flat', 'search backoff flat', 'contour not registered in the cycle', 'denylist replaced instead of merged'}
 # Defense in depth: each of these guards is made redundant by another one, so removing either ALONE cannot change
 # behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
+M_RUNNER = {'user-chosen patch ignored by the boot script policy': 'policy', 'doctor fails a user-chosen patch': 'doctor'}
 EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted'
 
 M = [
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
@@ -54,8 +57,29 @@ M = [
     ("refresh has no own budget", 'pif_install.go', 'refreshCtx, stop := context.WithTimeout(ctx, pifRefreshBudget)', 'refreshCtx, stop := context.WithCancel(ctx)'),
     ("sync failures not counted", 'pif_engine.go', '		e.pifSyncFails++\n		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()', '		e.status.PIF.Reason = "patch_sync_failed: " + err.Error()'),
     ("only DroidGuard is killed", 'pif_install.go', 'var pifPlayProcesses = []string{"com.google.android.gms.unstable", "com.google.android.gms", "com.android.vending"}', 'var pifPlayProcesses = []string{"com.google.android.gms.unstable"}'),
+    ("engine repairs a user-chosen patch", 'pif_engine.go', 'if st.PatchPair == "mismatch" && e.customPatchMarker() {', 'if false {'),
+    ("an empty marker dir counts as a choice", 'pif_engine.go', 'return err == nil && len(entries) > 0', 'return err == nil'),
+    ("user-chosen patch ignored by the boot script policy", '../pif_policy.sh', '    [ -n "$(ls -A "${PIF_BOX:-/data/adb/Box-Brain}/Custom-Patch" 2>/dev/null)" ] && return 1\n', ''),
+    ("doctor fails a user-chosen patch", '../webroot/common_scripts/doctor.sh', '            elif [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then', '            elif false; then'),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
+
+
+def precheck():
+    """Refuse to run on an uncommitted tree (a crash could then lose work) or with tests the filter never runs."""
+    st = subprocess.run(['git', 'status', '--porcelain', '--'] + FILES, cwd=D, capture_output=True, text=True)
+    if st.stdout.strip():
+        print('REFUSED: commit (or stash) your changes first; the harness edits these files in place:\n' + st.stdout)
+        sys.exit(3)
+    listed = subprocess.run(['go', 'test', '-list', '.', './...'], cwd=D, capture_output=True, text=True).stdout.split()
+    tests = [t for t in listed if t.startswith('Test')]
+    import re
+    both = RUN + '|Lifecycle|DaemonCycleRate'
+    missing = [t for t in tests if not re.search(both, t)]
+    if missing:
+        print('REFUSED: these tests are never run by any mutation (add a word of each name to RUN):\n  ' + '\n  '.join(missing))
+        sys.exit(3)
+    print(f'precheck ok: clean tree, {len(tests)} tests all reachable by the filter')
 
 
 def restore():
@@ -63,6 +87,7 @@ def restore():
         open(D + f, 'w').write(s)
 
 
+precheck()
 bad = 0
 try:
     base = subprocess.run(['go', 'test', '-count=1', '-run', RUN, './...'], cwd=D, capture_output=True, text=True)
@@ -77,13 +102,17 @@ try:
             bad += 1
             continue
         open(D + f, 'w').write(s.replace(a, b, 1))
-        build = subprocess.run(['go', 'build', '-o', '/dev/null', '.'], cwd=D, capture_output=True, text=True)
+        build = subprocess.run(['go', 'build', '-o', '/dev/null', '.'], cwd=D, capture_output=True, text=True) if f.endswith('.go') else subprocess.CompletedProcess([], 0, '', '')
         if build.returncode != 0:
             print(f'NOT COMPILABLE (mutation proves nothing): {desc}: {build.stderr.strip().splitlines()[-1][:90]}')
             bad += 1
             continue
-        pattern = RUN + '|Lifecycle|DaemonCycleRate' if desc in LIFE else RUN
-        r = subprocess.run(['go', 'test', '-count=1', '-run', pattern, './...'], cwd=D, capture_output=True, text=True)
+        runner = M_RUNNER.get(desc)
+        if runner:
+            r = subprocess.run(['sh', SHELL_TESTS[runner]], cwd=D, capture_output=True, text=True)
+        else:
+            pattern = RUN + '|Lifecycle|DaemonCycleRate' if desc in LIFE else RUN
+            r = subprocess.run(['go', 'test', '-count=1', '-run', pattern, './...'], cwd=D, capture_output=True, text=True)
         if r.returncode == 0 and desc in EQUIVALENT:
             print('equivalent (redundant guard):', desc)
         elif r.returncode == 0:
@@ -95,4 +124,8 @@ finally:
     restore()
 chk = subprocess.run(['go', 'test', '-count=1', '-run', RUN, './...'], cwd=D, capture_output=True, text=True)
 print('restored, baseline green:', chk.returncode == 0)
+dirty = subprocess.run(['git', 'status', '--porcelain', '--'] + FILES, cwd=D, capture_output=True, text=True).stdout.strip()
+if dirty:
+    print('ERROR: the working tree is not restored:\n' + dirty)
+    bad += 1
 sys.exit(1 if bad else 0)
