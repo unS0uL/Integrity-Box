@@ -177,7 +177,11 @@ func (e *Engine) writeMeta(path string, data []byte, defMode os.FileMode) error 
 		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
 			uid, gid = int(sys.Uid), int(sys.Gid)
 		}
-		c, cerr := fileContext(path)
+		read := e.contextOf
+		if read == nil {
+			read = fileContext
+		}
+		c, cerr := read(path)
 		switch {
 		case cerr == nil:
 			context = c

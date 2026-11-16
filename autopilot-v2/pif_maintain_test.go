@@ -718,14 +718,19 @@ func TestPIFWorkRunsInItsOwnCooldownScope(t *testing.T) {
 
 func TestStrictContextRefusesToGuessAndStaleTempFilesAreCleaned(t *testing.T) {
 	e, prop, _ := pifEngine(t, octoberPIF, "all=2026-10-05\n")
-	e.strictContext = true // on this host `ls -Zd` cannot read a context, exactly the failure being guarded
+	// The seam makes the failure identical on a host and on the phone (where `ls -Zd` works): the
+	// context of the file being replaced cannot be read.
+	e.contextOf = func(string) (string, error) { return "", errors.New("unreadable") }
+	e.strictContext = true
 	if err := e.writeMeta(prop, []byte("x"), 0644); err == nil {
-		if _, serr := fileContext(prop); serr != nil {
-			t.Fatal("an unreadable SELinux context must stop the replacement in strict mode")
-		}
+		t.Fatal("an unreadable SELinux context must stop the replacement in strict mode")
 	}
 	if b, _ := os.ReadFile(prop); string(b) != octoberPIF {
 		t.Fatal("the file must be untouched after the refusal")
+	}
+	e.strictContext = false // tests and hosts without SELinux keep working
+	if err := e.writeMeta(prop, []byte("x"), 0644); err != nil {
+		t.Fatalf("non-strict mode writes without a label: %v", err)
 	}
 	dir := filepath.Dir(prop)
 	old, fresh, other := filepath.Join(dir, ".autopilot-pif-old"), filepath.Join(dir, ".autopilot-pif-new"), filepath.Join(dir, ".autopilot-other")

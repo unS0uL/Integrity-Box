@@ -40,6 +40,7 @@ type Engine struct {
 	pifBannedFails, pifSearchFails int                                                          // consecutive unreachable-source failures (exponential backoff)
 	pifFailures                    int                                                          // consecutive failed installs (backoff)
 	scope                          string                                                       // prefix of per-host cooldown keys: the PIF contour must not cool down the keybox contour
+	contextOf                      func(path string) (string, error)                            // test seam: how the SELinux context of a file is read (default ls -Zd)
 	strictContext                  bool                                                         // fail instead of guessing when a replaced file's SELinux context cannot be read
 	pifBannedDue, pifSearchDue     float64                                                      // uptime of the next denylist refresh / replacement search
 	pifWriter                      func(string, []byte, os.FileMode) error                      // test seam: how the first write of an install is made
