@@ -16,7 +16,7 @@ import (
 )
 
 func allowedHost(host string) bool {
-	return host == "rawbin.dpejoh.com" || host == "github.com" || host == "release-assets.githubusercontent.com" || host == "objects.githubusercontent.com" || host == "android.googleapis.com" || extraAllowedHosts[host]
+	return host == "rawbin.dpejoh.com" || host == "github.com" || host == "release-assets.githubusercontent.com" || host == "objects.githubusercontent.com" || host == "android.googleapis.com" || host == "api.github.com" || extraAllowedHosts[host]
 }
 
 func cacheTTL(header string) time.Duration {

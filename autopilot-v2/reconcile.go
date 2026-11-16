@@ -84,6 +84,7 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		}
 	}
 	e.crl(ctx)
+	e.pifMaintain(ctx, automatic)
 	h := e.status.Local
 	if h.State == "time_unknown" {
 		return errors.New("system clock unknown")

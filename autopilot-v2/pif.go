@@ -150,13 +150,34 @@ func (f pifFile) render(tail string, released, expires time.Time, today string) 
 	return []byte(b.String())
 }
 
+var pifBuildDate = regexp.MustCompile(`\.(\d{2})(\d{2})(\d{2})\.`)
+
+// releaseDate is the explicit "Canary Released" comment, else the date embedded in the Google
+// build id (ZP11.261016.008 = 2026-10-16). The build date is a LOWER bound of the release:
+// Canary images appear up to weeks later (one measured case: 19 days), so the derived expiry
+// is early, never late: the contour may look for a replacement sooner, never too late.
+func (f pifFile) releaseDate() time.Time {
+	if !f.Released.IsZero() {
+		return f.Released
+	}
+	m := pifBuildDate.FindStringSubmatch(f.Props["ID"])
+	if m == nil {
+		return time.Time{}
+	}
+	t, err := time.Parse("2006-01-02", "20"+m[1]+"-"+m[2]+"-"+m[3])
+	if err != nil {
+		return time.Time{}
+	}
+	return t
+}
+
 // expiry returns the best known end of life: the explicit comment, else release + lifetime.
 func (f pifFile) expiry(lifetime time.Duration) time.Time {
 	if !f.Expires.IsZero() {
 		return f.Expires
 	}
-	if !f.Released.IsZero() {
-		return f.Released.Add(lifetime)
+	if r := f.releaseDate(); !r.IsZero() {
+		return r.Add(lifetime)
 	}
 	return time.Time{}
 }

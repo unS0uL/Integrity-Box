@@ -357,10 +357,15 @@ run_doctor pif_ok AP_TODAY=2026-12-20; contains "$OUT" "FAIL pif-expiry"
 run_doctor pif_ok AP_TODAY=2026-12-21; contains "$OUT" "FAIL pif-expiry"
 run_doctor pif_ok AP_TODAY=2026-12-17; contains "$OUT" "WARN pif-expiry"; contains "$OUT" "in 3 day"
 run_doctor pif_ok AP_TODAY=2026-12-16; contains "$OUT" "OK   pif-expiry"
-make_pif pif_noexp "$(pif_text 2026-11-05 none)
+make_pif pif_noexp "$(pif_text 2026-11-05 none BUILDX)
 " "all=2026-11-05
 "
 run_doctor pif_noexp AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-expiry"; contains "$OUT" "unknown"
+# no comments at all but a dated build id (ZP11.261016.008 = 2026-10-16): release from the id, + 42 days
+make_pif pif_idfb "$(pif_text 2026-11-05 none)
+" "all=2026-11-05
+"
+run_doctor pif_idfb AP_TODAY=2026-11-16; contains "$OUT" "OK   pif-expiry"; contains "$OUT" "release 2026-10-16 + 42 days"; contains "$OUT" "lower bound"
 # "Canary Released" without an explicit expiry: release + 42 days (same as the engine), policy-tunable
 make_pif pif_rel "$(pif_text 2026-11-05 none ZP11.261016.008 '# Canary Released: 2026-10-16')
 " "all=2026-11-05

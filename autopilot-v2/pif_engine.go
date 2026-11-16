@@ -221,6 +221,9 @@ func (e *Engine) pifDeadline() time.Time {
 	}
 	s := e.status.PIF
 	if s.State == "banned" || s.State == "expired" || s.State == "invalid" || s.PatchPair == "mismatch" {
+		if wait := e.pifSearchDue - e.uptime(); wait > 1800 && s.PatchPair != "mismatch" {
+			return time.Now().Add(time.Duration(wait * float64(time.Second))) // a failed search backs off
+		}
 		return time.Now().Add(30 * time.Minute)
 	}
 	if t, err := time.Parse("2006-01-02", s.Expires); err == nil {

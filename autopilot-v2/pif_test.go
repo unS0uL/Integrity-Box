@@ -138,7 +138,7 @@ func TestClassifyPIFDecisionTable(t *testing.T) {
 		{"expired for real", mustPIFExpiring(t, "2026-11-10"), nil, false, true, nil, "expired"},
 		{"clock unknown: no expiry judgement", old, nil, false, false, nil, "ok"},
 		{"fresh by release + lifetime", fresh, nil, false, true, nil, "ok"},
-		{"unknown expiry is ok", mustPIF(t, novemberMeow), nil, false, true, nil, "ok"},
+		{"no comments: expiry from the build id (2026-10-16 + 42d)", mustPIF(t, novemberMeow), nil, false, true, nil, "ok"},
 		{"banned by fingerprint string", fresh, nil, false, true, map[string]bool{fresh.Props["FINGERPRINT"]: true}, "banned"},
 	}
 	for _, c := range cases {
@@ -357,5 +357,28 @@ func TestClassifyPIFExpiryBoundaries(t *testing.T) {
 		if got := classifyPIF(f, nil, false, c.now, true, pol, nil); got != c.want {
 			t.Errorf("now=%s: got %s want %s", c.now.Format(time.RFC3339), got, c.want)
 		}
+	}
+}
+
+func TestReleaseDateFallsBackToBuildID(t *testing.T) {
+	f := mustPIF(t, novemberMeow) // ZP11.261016.008, no comments
+	if got := f.releaseDate().Format("2006-01-02"); got != "2026-10-16" {
+		t.Fatalf("release from build id = %s", got)
+	}
+	if got := f.expiry(42 * 24 * time.Hour).Format("2006-01-02"); got != "2026-11-27" {
+		t.Fatalf("expiry = %s", got)
+	}
+	f.Released = time.Date(2026, 10, 20, 0, 0, 0, 0, time.UTC) // an explicit comment wins
+	if got := f.releaseDate().Format("2006-01-02"); got != "2026-10-20" {
+		t.Fatalf("explicit release must win, got %s", got)
+	}
+	g := mustPIF(t, strings.Replace(strings.Replace(novemberMeow, "ZP11.261016.008", "BUILD-X", 2), "ZP11.261016.008", "BUILD-X", 1))
+	if !g.releaseDate().IsZero() || !g.expiry(time.Hour).IsZero() {
+		t.Fatal("an id without a date leaves the expiry unknown")
+	}
+	// the clock gate: 2026-11-26 is inside the 72h window, 2026-11-27 is expired
+	pol := defaultPIFPolicy()
+	if s := classifyPIF(mustPIF(t, novemberMeow), nil, false, time.Date(2026, 11, 25, 0, 0, 0, 0, time.UTC), true, pol, nil); s != "expiring" {
+		t.Fatalf("2026-11-25 -> %s, want expiring (72h window)", s)
 	}
 }

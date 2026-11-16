@@ -9,30 +9,32 @@ import (
 )
 
 type Engine struct {
-	bootClock         func() float64
-	statusErrorAt     time.Time
-	timeCheck         func(context.Context) error
-	moduleRoot        string
-	crlBoot           float64
-	crlTTL            time.Duration
-	workerCommand     func() *exec.Cmd
-	request           func(*http.Request) (*http.Response, error)
-	forcedTier        string
-	slot              string
-	cache             map[string]cacheEntry
-	hostNext          map[string]time.Time
-	root, ram, brain  string
-	dryRun            bool
-	client            *http.Client
-	status            Status
-	revoked           map[string]bool
-	crlAt             time.Time
-	cursor            int
-	automaticFetchDue float64
-	searched          bool
-	lastSearchBoot    float64
-	urgentEvidence    string
-	pifBanned         map[string]bool // denylisted fingerprint ids and strings (RAM, rebuilt from the source)
+	bootClock                  func() float64
+	statusErrorAt              time.Time
+	timeCheck                  func(context.Context) error
+	moduleRoot                 string
+	crlBoot                    float64
+	crlTTL                     time.Duration
+	workerCommand              func() *exec.Cmd
+	request                    func(*http.Request) (*http.Response, error)
+	forcedTier                 string
+	slot                       string
+	cache                      map[string]cacheEntry
+	hostNext                   map[string]time.Time
+	root, ram, brain           string
+	dryRun                     bool
+	client                     *http.Client
+	status                     Status
+	revoked                    map[string]bool
+	crlAt                      time.Time
+	cursor                     int
+	automaticFetchDue          float64
+	searched                   bool
+	lastSearchBoot             float64
+	urgentEvidence             string
+	pifBannedDue, pifSearchDue float64                     // uptime of the next denylist refresh / replacement search
+	restartGMS                 func(context.Context) error // test hook: restart Play Services
+	pifBanned                  map[string]bool             // denylisted fingerprint ids and strings (RAM, rebuilt from the source)
 	// Consumer verification. Zero values keep the legacy behaviour (used by unit tests).
 	modulesRoot          string
 	logs                 logChannel

@@ -397,6 +397,9 @@ pif_summary() {
             if (it[2] != P["TYPE"]) bad("fingerprint_vs_TYPE")
             if (a[6] != P["TAGS"]) bad("fingerprint_vs_TAGS")
             if (P["SECURITY_PATCH"] !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) bad("SECURITY_PATCH_format")
+            if (released == "" && match(P["ID"], /\.[0-9][0-9][0-9][0-9][0-9][0-9]\./)) {
+                x = substr(P["ID"], RSTART + 1, 6); released = "20" substr(x, 1, 2) "-" substr(x, 3, 2) "-" substr(x, 5, 2)
+            }
             print "OK - " P["ID"] " " P["SECURITY_PATCH"] " " (expiry == "" ? "-" : expiry) " " (released == "" ? "-" : released) " " P["FINGERPRINT"]
         }' "$1"
 }
@@ -448,7 +451,7 @@ check_pif() {
     if [ "$pexp" = - ] && [ "$prel" != - ]; then
         # Same rule as the engine: no explicit expiry means release + lifetime.
         left=$(( $(day_number "$prel") + life - $(day_number "$today") ))
-        est=" (estimated: release $prel + $life days)"
+        est=" (estimated: release $prel + $life days; a build-id date is a lower bound)"
     elif [ "$pexp" != - ]; then
         left=$(( $(day_number "$pexp") - $(day_number "$today") ))
     fi
