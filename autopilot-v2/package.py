@@ -16,12 +16,21 @@ def main():
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z']).decode().split('\0')
+    # Development files never ship: dot-files (.gitignore, .gitmodules, .gitguard-allow, .github/), tests, docs.
     names = {n for n in names if n and not n.startswith(('autopilot-v2/', 'docs/', 'assets/'))
+             and not any(part.startswith('.') for part in n.split('/'))
              and n not in ('hash', 'README.md', 'changelog.md')}
     names.update(('webroot/common_scripts/bin/box-autopilot', 'webroot/common_scripts/bin/GO-LICENSE'))
+    # A shipped file must be exactly what is committed (the engine's provenance is checked against HEAD).
+    dirty = subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain', '--'] + sorted(names)).decode().strip()
+    if dirty:
+        raise RuntimeError('refusing to package files that differ from HEAD:\n' + dirty)
+    subprocess.run(['sh', str(repo / 'autopilot-v2/verify_binary.sh')], check=True)
     files = {n: (repo / n).read_bytes() for n in sorted(names) if (repo / n).is_file()}
+    # The manifest lists what the installer extracts. Magisk/KernelSU unpack with `unzip -x 'META-INF/*'`, so
+    # META-INF must NOT be in it (verify.sh refuses a manifest entry whose file is missing) - but it must be in the zip.
     manifest = ''.join(n + '|' + hashlib.sha256(data).hexdigest() + '\n'
-                       for n, data in sorted(files.items()))
+                       for n, data in sorted(files.items()) if not n.startswith('META-INF/'))
     files['hash'] = manifest.encode()
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(args.output, 'w', zipfile.ZIP_DEFLATED) as archive:
@@ -35,7 +44,10 @@ def main():
         if archive.testzip() is not None:
             raise RuntimeError('ZIP CRC verification failed')
         with tempfile.TemporaryDirectory(prefix='box-package-') as directory:
-            archive.extractall(directory)
+            if 'META-INF/com/google/android/update-binary' not in archive.namelist():
+                raise RuntimeError('the package has no META-INF/com/google/android/update-binary')
+            # extract the way the installer does: everything except META-INF
+            archive.extractall(directory, [n for n in archive.namelist() if not n.startswith('META-INF/')])
             env = dict(os.environ, MODPATH=directory, LC_ALL="C", LC_CTYPE="C", LANG="C")
             if shutil.which('sha256sum') is None:
                 if shutil.which('shasum') is None:
