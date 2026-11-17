@@ -14,4 +14,9 @@ echo 'echo REACHED_CLEANUP' >> "$W/m/uninstall.sh"
 out=$(sh "$W/m/uninstall.sh" 2>/dev/null) || { echo "FAIL: uninstall.sh exited early"; exit 1; }
 case "$out" in *REACHED_CLEANUP*) ;; *) echo "FAIL: cleanup not reached"; exit 1 ;; esac
 [ ! -e "$W/flag" ] || { echo "FAIL: the enable flag was not removed when disable failed"; exit 1; }
+# the success path: when disable works, the header leaves the flag alone (the engine owns it then)
+printf '#!/bin/sh\nexit 0\n' > "$W/m/webroot/common_scripts/autopilot.sh"
+echo 1 > "$W/flag"
+sh "$W/m/uninstall.sh" >/dev/null 2>&1 || { echo "FAIL: uninstall.sh failed although disable worked"; exit 1; }
+[ -e "$W/flag" ] || { echo "FAIL: the flag was removed by hand although disable succeeded"; exit 1; }
 echo "PASS: uninstall.sh continues and drops the enable flag when disable fails"
