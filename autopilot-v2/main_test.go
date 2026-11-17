@@ -480,6 +480,29 @@ func TestRestartBackoffForgetsAHealthyRun(t *testing.T) {
 	}
 }
 
+func TestSupervisorSurvivesAWorkerThatCannotStart(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "autopilot"), nil, 0600)
+	e := Engine{root: dir, ram: dir, brain: dir, workerCommand: func() *exec.Cmd { return exec.Command(filepath.Join(dir, "no-such-binary")) }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- e.supervise(ctx) }()
+	select {
+	case err := <-done:
+		t.Fatalf("a failed fork/exec must not end the supervisor: %v", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("supervisor did not stop on cancel while backing off")
+	}
+}
+
 func TestSupervisorCancellationAndSingleton(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "autopilot"), nil, 0600)
@@ -998,5 +1021,11 @@ func TestCorruptRevisionBlocksInstallsButNotStop(t *testing.T) {
 	got, _ := os.ReadFile(e.target())
 	if !bytes.Equal(got, old) {
 		t.Fatal("working file changed")
+	}
+}
+
+func TestAnUnsetClockIsRetriedSoon(t *testing.T) {
+	if failureRetry("time_unknown") != 5*time.Minute || failureRetry("waiting") != 2*time.Hour || failureRetry("") != 2*time.Hour {
+		t.Fatal("time_unknown retries in 5 minutes, any other failure in 2 hours")
 	}
 }

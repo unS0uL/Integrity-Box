@@ -109,7 +109,16 @@ func (e *Engine) supervise(ctx context.Context) error {
 		tail := &diagnosticTail{}
 		child.Stderr = tail
 		if err = child.Start(); err != nil {
-			return err
+			// fork/exec can fail under memory pressure: that is a crash like any other, not the end of the supervisor
+			var delay time.Duration
+			crashes, delay = restartBackoff(crashes, 0)
+			logEvent("worker_start_failed", "local", crashes)
+			select {
+			case <-ctx.Done():
+				return nil
+			case <-time.After(delay):
+			}
+			continue
 		}
 		started := e.now()
 		done := make(chan error, 1)

@@ -334,6 +334,15 @@ func bootSeconds() float64 {
 	return v
 }
 
+// failureRetry: how long to wait after a failed cycle. An unset clock (typically right after boot) is fixed within
+// minutes, so that case is retried soon; everything else waits two hours.
+func failureRetry(phase string) time.Duration {
+	if phase == "time_unknown" {
+		return 5 * time.Minute
+	}
+	return 2 * time.Hour
+}
+
 func (e *Engine) daemon(ctx context.Context) error {
 	if math.IsNaN(e.uptime()) {
 		return errors.New("BOOTTIME unavailable")
@@ -449,7 +458,7 @@ func (e *Engine) daemon(ctx context.Context) error {
 		if err != nil {
 			e.status.Reason = err.Error()
 
-			next = time.Now().Add(2 * time.Hour)
+			next = time.Now().Add(failureRetry(e.status.Phase))
 			if e.automaticFetchDue > e.uptime() {
 				next = time.Now().Add(time.Duration((e.automaticFetchDue - e.uptime()) * float64(time.Second)))
 			}

@@ -103,7 +103,7 @@ func main() {
 
 	}
 	e.status = Status{Integrity: "not_measured", Revocation: "unknown", Phase: "starting", TimeState: "unknown"}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP)
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT) // not SIGHUP: handling it would undo the SIG_IGN that nohup gives the supervisor
 	defer cancel()
 	var err error
 	switch os.Args[1] {
