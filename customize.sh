@@ -376,6 +376,7 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
     cp "$MODPATH/toolkit/integrity_box_ui_settings" "$FLAG/integrity_box_ui_settings"
 fi
 
+[ -d "$TRICKY/keys" ] && rm -rf "$TRICKY/keys"
 if [ ! -f $TRICKY/security_patch.txt ]; then
 # The patch must equal the PIF fingerprint's SECURITY_PATCH (Law 15). Without a valid one nothing is
 # invented: Tricky Store then simply has no patch override.
