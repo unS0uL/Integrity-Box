@@ -18,11 +18,11 @@ const assert = require('node:assert/strict');
   // through the AutoPilot engine (validation + rollback), the other targets keep the author's plain copy
   const code = take('const BACKUP_DIR', 'let allFiles') + take('function shellQuote', '\nfunction showToast') +
     take('async function setKeybox', '\ndocument.getElementById("closePreview")');
-  let commands, toast, reply;
+  let commands, toast, reply, closedWhileSetting;
   const context = vm.createContext({runShell: async command => {
     commands.push(command);
     return reply;
-  }, showToast: (...args) => {toast = args;}, closeConfirmation: () => {}, console: {error: () => {}},
+  }, showToast: (...args) => {toast = args;}, closeConfirmation: () => {closedWhileSetting = context.isSettingNow();}, isSettingNow: () => vm.runInContext('isSetting', context), console: {error: () => {}},
   document: {querySelectorAll: () => []}});
   vm.runInContext('let selectedFile = null, isSetting = false, isCheckingStatus = false;', context);
   vm.runInContext(code, context);
@@ -35,6 +35,8 @@ const assert = require('node:assert/strict');
     commands = []; reply = 'IMPORT_EXIT=0';
     await context.setKeybox('tricky');
     assert.equal(toast[1], 'success');
+    assert.equal(closedWhileSetting, false, 'closeConfirmation() (it deletes the imported keybox copy) must run after isSetting is released');
+    assert(/autopilot\.sh import .* 1 2>&1;/.test(commands[1]), 'stderr must reach the user: the engine explains a refusal there');
     assert.equal(commands.length, 2, 'backup step, then the engine import');
     assert(!/cp -f "\$src" "\$target"/.test(commands[0]), 'the main slot must not be copied blindly');
     assert(/cp -f "\$target" "\$backup_file"/.test(commands[0]), "the author's backup of the previous key stays");
@@ -52,6 +54,15 @@ const assert = require('node:assert/strict');
     commands = [];
     await context.setKeybox('tricky');
     assert.equal(toast[1], 'error');
+    // the bridge timeout (15 s) is not an engine failure
+    const realRun = context.runShell;
+    let calls = 0;
+    context.runShell = async command => {commands.push(command); if (++calls === 2) throw new Error('Shell command timed out'); return reply;};
+    commands = [];
+    await context.setKeybox('tricky');
+    assert.equal(toast[1], 'error');
+    assert(/still running/.test(toast[0]), 'a bridge timeout must say the import may still finish, got: ' + toast[0]);
+    context.runShell = realRun;
     // OhMyKeyMint / TEE Simulator: the author's plain copy, the engine is not involved
     for (const key of ['omk', 'teesim']) {
       reply = '';
