@@ -6,7 +6,7 @@
 # 1. the tracked binary matches its provenance file (box-autopilot.sha256);
 # 2. a fresh build of `git archive HEAD autopilot-v2` (the working tree cannot influence it) gives the same bytes.
 # A difference with the SAME Go toolchain means the binary is stale: rebuild it with build.sh in its own commit.
-# With a different toolchain the comparison is inconclusive (reported, not failed).
+# With a different toolchain the comparison is inconclusive: exit status 3, never a PASS (set VERIFY_BINARY_ALLOW_INCONCLUSIVE=1 to accept it).
 set -eu
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ROOT="$HERE/.."
@@ -34,3 +34,5 @@ if [ "$want" = "$have" ]; then
     fail "STALE: a rebuild with the recorded toolchain gives $(printf %s "$rebuilt" | cut -c1-12), the tracked binary is $(printf %s "$actual" | cut -c1-12). Rebuild with build.sh in its own commit."
 fi
 echo "INCONCLUSIVE: toolchain differs (recorded: $want; have: $have); rebuild gives $(printf %s "$rebuilt" | cut -c1-12), tracked is $(printf %s "$actual" | cut -c1-12)"
+[ "${VERIFY_BINARY_ALLOW_INCONCLUSIVE:-}" = 1 ] && exit 0
+exit 3

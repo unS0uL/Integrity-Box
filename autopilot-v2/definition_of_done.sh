@@ -60,7 +60,13 @@ else
 fi
 
 echo "== the shipped binary (Law 16, binary policy)"
-step "tracked box-autopilot is a reproducible build of the committed source" sh "$HERE/verify_binary.sh"
+vbout=$(mktemp); sh "$HERE/verify_binary.sh" >"$vbout" 2>&1; vb=$?
+case $vb in
+    0) printf 'PASS  %s\n' "tracked box-autopilot is a reproducible build of the committed source" ;;
+    3) note "tracked box-autopilot NOT verified here (different Go toolchain): $(tail -n 1 "$vbout") - verify on the recorded toolchain" ;;
+    *) printf 'FAIL  %s\n' "tracked box-autopilot is a reproducible build of the committed source"; tail -n 8 "$vbout" | sed 's/^/        /'; FAILS=$((FAILS + 1)) ;;
+esac
+rm -f "$vbout"
 
 echo "== shell"
 for sh_ in sh dash bash; do
