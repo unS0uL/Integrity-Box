@@ -25,7 +25,10 @@ def main():
     dirty = subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain', '--'] + sorted(names)).decode().strip()
     if dirty:
         raise RuntimeError('refusing to package files that differ from HEAD:\n' + dirty)
-    subprocess.run(['sh', str(repo / 'autopilot-v2/verify_binary.sh')], check=True)
+    verified = subprocess.run(['sh', str(repo / 'autopilot-v2/verify_binary.sh')], capture_output=True, text=True)
+    if verified.returncode != 0:
+        raise RuntimeError('the engine binary is not verified against the committed source '
+                           '(exit %d; 3 = built with another Go toolchain):\n%s%s' % (verified.returncode, verified.stdout, verified.stderr))
     files = {n: (repo / n).read_bytes() for n in sorted(names) if (repo / n).is_file()}
     # The manifest lists what the installer extracts. Magisk/KernelSU unpack with `unzip -x 'META-INF/*'`, so
     # META-INF must NOT be in it (verify.sh refuses a manifest entry whose file is missing) - but it must be in the zip.
