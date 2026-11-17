@@ -69,6 +69,21 @@ func signalSupervisor(ram string) {
 	}
 	_ = syscall.Kill(o.PID, syscall.SIGTERM)
 }
+
+// restartBackoff: one more crash lengthens the wait (1 min per crash, at most 30), but a worker that ran for
+// 10 minutes or more was healthy, so its next crash starts the back-off over.
+func restartBackoff(crashes int, ranFor time.Duration) (int, time.Duration) {
+	if ranFor >= 10*time.Minute {
+		crashes = 0
+	}
+	crashes++
+	delay := time.Duration(crashes) * time.Minute
+	if delay > 30*time.Minute {
+		delay = 30 * time.Minute
+	}
+	return crashes, delay
+}
+
 func (e *Engine) supervise(ctx context.Context) error {
 	f, err := lock(filepath.Join(e.ram, "supervisor.lock"))
 	if err != nil {
@@ -96,6 +111,7 @@ func (e *Engine) supervise(ctx context.Context) error {
 		if err = child.Start(); err != nil {
 			return err
 		}
+		started := e.now()
 		done := make(chan error, 1)
 		go func() { done <- child.Wait() }()
 		timer := time.NewTicker(60 * time.Second)
@@ -140,11 +156,8 @@ func (e *Engine) supervise(ctx context.Context) error {
 		if !e.enabled() || ctx.Err() != nil {
 			return nil
 		}
-		crashes++
-		delay := time.Duration(crashes) * time.Minute
-		if delay > 30*time.Minute {
-			delay = 30 * time.Minute
-		}
+		var delay time.Duration
+		crashes, delay = restartBackoff(crashes, e.now().Sub(started))
 		select {
 		case <-ctx.Done():
 			return nil

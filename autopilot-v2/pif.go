@@ -116,6 +116,11 @@ func (f pifFile) check() error {
 			return fmt.Errorf("FINGERPRINT disagrees with %s", names[i])
 		}
 	}
+	// a fingerprint that is not a user build with release keys does not pass Play Integrity, and once installed it would
+	// be classed "custom" and never replaced
+	if f.Props["TYPE"] != "user" || f.Props["TAGS"] != "release-keys" {
+		return errors.New("TYPE/TAGS must be user/release-keys")
+	}
 	for _, k := range []string{"ID", "FINGERPRINT", "INCREMENTAL", "PRODUCT", "DEVICE"} {
 		if strings.Contains(f.Props[k], " ") { // a space shifts the fields the shell doctor reads
 			return fmt.Errorf("%s contains a space", k)

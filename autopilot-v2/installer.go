@@ -233,15 +233,7 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 			return err
 		}
 	}
-	paths := []string{e.target()}
-	for _, v := range []struct{ flag, module, target string }{{"sim-key", "teesim", "/data/adb/teesim/keybox.xml"}, {"omk-key", "oh_my_keymint", "/data/misc/keystore/omk/keybox.xml"}} {
-		if e.slot == "" && exists(filepath.Join(e.brain, v.flag)) {
-			mod := "/data/adb/modules/" + v.module
-			if exists(mod) && !exists(filepath.Join(mod, "disable")) {
-				paths = append(paths, v.target)
-			}
-		}
-	}
+	paths := append([]string{e.target()}, e.secondaryTargets()...)
 	dir := filepath.Join(e.root, ".autopilot-transaction")
 	if err = os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -359,4 +351,30 @@ func (e *Engine) installedSource(fingerprint string) string {
 		return r.Source
 	}
 	return "unknown"
+}
+
+// secondaryTargets: the other consumers (TEE Simulator, OhMyKeyMint) the user asked to keep in step with the main key.
+// A consumer that is disabled, being removed or has no directory yet (it creates it on its first start) is skipped:
+// it must never make the install of the main Tricky Store key fail.
+func (e *Engine) secondaryTargets() []string {
+	if e.slot != "" {
+		return nil
+	}
+	var out []string
+	for _, v := range []struct{ flag, module, target string }{{"sim-key", "teesim", "/data/adb/teesim/keybox.xml"}, {"omk-key", "oh_my_keymint", "/data/misc/keystore/omk/keybox.xml"}} {
+		if !exists(filepath.Join(e.brain, v.flag)) {
+			continue
+		}
+		mod := filepath.Join(e.modules(), v.module)
+		if !exists(mod) || exists(filepath.Join(mod, "disable")) || exists(filepath.Join(mod, "remove")) {
+			continue
+		}
+		target := filepath.Join(e.dataRoot, v.target)
+		if st, err := os.Stat(filepath.Dir(target)); err != nil || !st.IsDir() {
+			logEvent("secondary_target_unavailable", v.module, 0)
+			continue
+		}
+		out = append(out, target)
+	}
+	return out
 }

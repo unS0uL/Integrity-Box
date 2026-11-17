@@ -36,8 +36,8 @@ func (e *Engine) now() time.Time {
 	return time.Now()
 }
 
-// customPatchMarker: the Patch page of the WebUI records an explicit user choice as a file
-// Box-Brain/Custom-Patch/<date> next to the security_patch.txt it writes.
+// customPatchMarker: an explicit user choice is a file Box-Brain/Custom-Patch/<date>. The Patch page of the WebUI that
+// used to write it was removed in v48, so it is now created by hand.
 func (e *Engine) customPatchMarker() bool {
 	entries, err := os.ReadDir(filepath.Join(e.brain, "Custom-Patch"))
 	return err == nil && len(entries) > 0
@@ -149,7 +149,7 @@ func (e *Engine) pifAudit(timeOK bool) (pifFile, patchFile) {
 		st.PatchFile = pf.Value
 		st.PatchPair = pf.pair(f.patch())
 		if st.PatchPair == "mismatch" && e.customPatchMarker() {
-			st.PatchPair = "override" // the user chose this date in the Patch page: their decision wins, doctor warns
+			st.PatchPair = "override" // the user pinned this date (Custom-Patch marker): their decision wins, doctor warns
 		}
 	}
 	return f, pf

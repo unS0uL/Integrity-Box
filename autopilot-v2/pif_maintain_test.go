@@ -1544,3 +1544,16 @@ func TestZeroPolicyBehavesAsTheDefaults(t *testing.T) {
 		t.Fatalf("%+v", p)
 	}
 }
+
+// A failed install over an ABSENT fingerprint file must leave no file behind (restoring "nothing" = deleting the candidate).
+func TestPifRestoreOfAnAbsentFileRemovesTheCandidate(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-11-05\n")
+	prop := m.e.pifPropPath()
+	if _, err := os.Stat(prop); err != nil {
+		t.Fatalf("fixture has no fingerprint file: %v", err)
+	}
+	m.e.pifRestore(prop, nil, true)
+	if _, err := os.Stat(prop); !os.IsNotExist(err) {
+		t.Fatalf("the candidate must be removed, stat err=%v", err)
+	}
+}

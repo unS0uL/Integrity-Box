@@ -464,6 +464,22 @@ func TestSuspendClock(t *testing.T) {
 	}
 }
 
+func TestRestartBackoffForgetsAHealthyRun(t *testing.T) {
+	n, d := 0, time.Duration(0)
+	for i := 1; i <= 40; i++ { // a worker that keeps crashing right away: 1, 2, ... 30 minutes, capped
+		n, d = restartBackoff(n, time.Second)
+	}
+	if n != 40 || d != 30*time.Minute {
+		t.Fatalf("cap: %d %v", n, d)
+	}
+	if n, d = restartBackoff(n, 3*time.Hour); n != 1 || d != time.Minute {
+		t.Fatalf("a worker that ran for hours must restart the back-off: %d %v", n, d)
+	}
+	if n, d = restartBackoff(n, 9*time.Minute+59*time.Second); n != 2 || d != 2*time.Minute {
+		t.Fatalf("under ten minutes still counts as a crash: %d %v", n, d)
+	}
+}
+
 func TestSupervisorCancellationAndSingleton(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "autopilot"), nil, 0600)

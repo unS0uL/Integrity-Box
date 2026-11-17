@@ -151,13 +151,18 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
+// curlArgs: --http1.1 because the response is parsed with net/http.ReadResponse, which rejects an "HTTP/2 200" status line.
+func curlArgs(limit int64) []string {
+	return []string{"--disable", "--silent", "--show-error", "--include", "--http1.1", "--raw", "--connect-timeout", "4", "--max-time", "10", "--max-filesize", strconv.FormatInt(limit, 10), "--proto", "=https"}
+}
+
 func nativeHTTP(ctx context.Context, address string, limit int64, headers http.Header) (*http.Response, error) {
 	for redirect := 0; redirect < 5; redirect++ {
 		u, err := url.Parse(address)
 		if err != nil || u.Scheme != "https" || u.User != nil || !allowedHost(u.Hostname()) || u.Port() != "" && u.Port() != "443" {
 			return nil, errors.New("redirect policy")
 		}
-		args := []string{"--disable", "--silent", "--show-error", "--include", "--raw", "--connect-timeout", "4", "--max-time", "10", "--max-filesize", strconv.FormatInt(limit, 10), "--proto", "=https"}
+		args := curlArgs(limit)
 		for name, values := range headers {
 			for _, value := range values {
 				if !strings.ContainsAny(value, "\r\n") {

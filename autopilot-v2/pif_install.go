@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -193,7 +194,7 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	back, _, err := readOptional(prop, pifMaxBytes)
 	if err != nil || !bytes.Equal(back, data) {
 		restoreAll()
-		return errors.New("readback differs; previous file restored")
+		return errors.New("readback differs; previous state restored")
 	}
 	f, p := e.pifAudit(true)
 	if err = e.pifSyncPatch(f, p); err != nil {
@@ -218,6 +219,8 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 func (e *Engine) pifRestore(prop string, orig []byte, absent bool) {
 	if !absent {
 		_ = e.writeMeta(prop, orig, 0644)
+	} else {
+		_ = os.Remove(prop) // there was no file before: do not leave the candidate behind as if it were the user's
 	}
 	f, p := e.pifAudit(true)
 	_ = e.pifSyncPatch(f, p)

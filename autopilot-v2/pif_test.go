@@ -100,6 +100,8 @@ func TestParsePIFRejects(t *testing.T) {
 		"duplicate key":                      novemberMeow + "MODEL=Other\n",
 		"fingerprint shape":                  replace("FINGERPRINT=google/bluejay_beta/bluejay:CANARY/ZP11.261016.008/16754936:user/release-keys", "FINGERPRINT=google/bluejay"),
 		"lowercase key":                      novemberMeow + "model=x\n",
+		"userdebug build":                    strings.NewReplacer(":user/release-keys", ":userdebug/release-keys", "TYPE=user", "TYPE=userdebug").Replace(novemberMeow),
+		"test-keys build":                    strings.NewReplacer(":user/release-keys", ":user/test-keys", "TAGS=release-keys", "TAGS=test-keys").Replace(novemberMeow),
 	}
 	for name, text := range cases {
 		if _, err := parsePIF([]byte(text)); err == nil {
@@ -417,5 +419,14 @@ func TestABuildIdWithAnImpossibleDateHasNoReleaseDate(t *testing.T) {
 	f := mustPIF(t, text)
 	if !f.releaseDate().IsZero() || !f.expiry(42*24*time.Hour).IsZero() {
 		t.Fatalf("an impossible date must not become a date: %v", f.releaseDate())
+	}
+}
+
+func TestNativeCurlSpeaksHTTP1(t *testing.T) {
+	args := strings.Join(curlArgs(1024), " ")
+	for _, want := range []string{"--http1.1", "--proto =https", "--max-filesize 1024", "--include"} {
+		if !strings.Contains(args, want) {
+			t.Errorf("curl arguments lack %q: %s", want, args)
+		}
 	}
 }

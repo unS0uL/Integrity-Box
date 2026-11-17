@@ -50,6 +50,7 @@ type Engine struct {
 	pifBanned                      map[string]bool                                              // denylisted fingerprint ids and strings (RAM, rebuilt from the source)
 	// Consumer verification. Zero values keep the legacy behaviour (used by unit tests).
 	modulesRoot          string
+	dataRoot             string // tests only: prefix of the other keybox consumers' directories
 	logs                 logChannel
 	probeSettle          time.Duration
 	probePoll            time.Duration
