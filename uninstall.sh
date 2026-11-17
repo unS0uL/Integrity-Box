@@ -86,6 +86,26 @@ delete_file /data/adb/service.d/lineage.sh
 delete_file /data/adb/service.d/prop.sh
 delete_file /data/adb/service.d/shamiko.sh
 
+# Special treatment for an AI-generated garbage module named SPECTER that removes IntegrityBox for no reason, 
+
+# It deliberately removes IntegrityBox under the vague excuse of a "conflict" without ever identifying or explaining any actual incompatibility. 
+
+# If a real conflict existed, it could've been documented instead of silently removing it.
+
+# We don't support misleading behavior or arbitrary decisions disguised as compatibility fixes 
+
+# Looks more like another blind hater than someone acting in good faith. Anyway, I got you, bro.
+
+delete_file /data/adb/modules/specter
+delete_file /data/adb/specter
+delete_file /data/adb/modules_update/specter
+delete_file /sdcard/specter-update
+
+# https://github.com/dpejoh/specter/blob/489ca15ba02d8de781d275c5db8c502dbb255247/src/lib/conflicts.sh#L20
+
+# play stupid games, win stupid prizes 
+# HAPPY VIBE CODING, GOOD LUCK RUNNING MY uninstall.sh KID
+
 # Restore backups
 restore_backup "$TARGET_BACKUP" "$TARGET"
 restore_backup "$KEYBOX_BACKUP" "$KEYBOX"

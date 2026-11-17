@@ -1,0 +1,52 @@
+# REDMAGIC 11 Pro (NX809J)
+
+# ──────────────────────────
+# BUILD IDENTITY
+# ──────────────────────────
+ro.build.id=REDMAGICOS11.5.8MR1_GB
+ro.build.display.id=REDMAGICOS11.5.8MR1_GB
+ro.build.version.incremental=20260920.170042
+
+ro.build.type=user
+ro.build.user=android-build
+ro.build.host=redmagic
+ro.build.tags=release-keys
+ro.build.flavor=NX809J-user
+
+ro.build.fingerprint=REDMAGIC/NX809J-UN/NX809J:16/BQ2A.250705.001-BP2A.250605.031.A3/20260920.170042:user/release-keys
+ro.build.description=NX809J-UN-user 16 BQ2A.250705.001-BP2A.250605.031.A3 20260920.170042 release-keys
+ro.build.product=NX809J
+ro.build.characteristics=default
+
+ro.build.date=Sun Sep 20 17:00:42 UTC 2026
+ro.build.date.utc=1789923642
+#ro.build.thumbprint=
+
+# ──────────────────────────
+# ANDROID VERSION
+# ──────────────────────────
+ro.build.version.release=16
+ro.build.version.sdk=36
+ro.build.version.preview_sdk=0
+ro.build.version.codename=REL
+ro.build.version.all_codenames=REL
+ro.build.version.security_patch=2026-08-01
+#ro.build.version.base_os=
+
+# ──────────────────────────
+# PRODUCT / DEVICE
+# ──────────────────────────
+ro.product.brand=REDMAGIC
+ro.product.name=NX809J-UN
+ro.product.model=NX809J
+ro.product.device=NX809J
+ro.product.manufacturer=nubia
+ro.product.board=canoe
+
+# ──────────────────────────
+# HARDWARE / SOC
+# ──────────────────────────
+ro.hardware=qcom
+ro.board.platform=sun
+ro.soc.manufacturer=Qualcomm
+ro.soc.model=SM8850

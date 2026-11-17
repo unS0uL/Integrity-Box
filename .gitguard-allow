@@ -4,3 +4,5 @@ webroot/common_scripts/bin/*
 *.jpg
 *.apk
 *.zip
+# the author's RepairMode page (v48.1): 2 MB with one obfuscated script; audited in an isolated vm on 2026-11-17 (it only resets tricky_store/key_db and runs action.sh/service.sh of the attestation modules)
+webroot/RepairMode/index.html
