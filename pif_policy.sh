@@ -25,7 +25,7 @@ pif_conf_get() {
 # contour is in report-only/off mode, or the user switched the patch synchronisation off.
 pif_may_write_patch() {
     [ -f "${PIF_BOX:-/data/adb/Box-Brain}/patch" ] && return 1
-    # a date the user set on purpose in the Patch page of the WebUI (it leaves Custom-Patch/<date>)
+    # a date the user pinned on purpose: any file in Custom-Patch/ (the Patch page that wrote it was removed in v48, so it is now created by hand)
     [ -n "$(ls -A "${PIF_BOX:-/data/adb/Box-Brain}/Custom-Patch" 2>/dev/null)" ] && return 1
     case "$(pif_conf_get pif_mode)" in manual | off) return 1 ;; esac
     case "$(pif_conf_get pif_sync_patch)" in off | false | 0 | no) return 1 ;; esac

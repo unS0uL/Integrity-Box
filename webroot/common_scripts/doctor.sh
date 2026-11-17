@@ -510,7 +510,7 @@ check_pif() {
                 "$pval"-*) report OK patch-pair "month $pval matches PIF patch $ppatch" ;;
                 *)
                     if [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then
-                        report WARN patch-pair "custom patch month $pval (set in the Patch page) differs from PIF patch $ppatch: kept as chosen"
+                        report WARN patch-pair "custom patch month $pval (pinned by a file in Box-Brain/Custom-Patch) differs from PIF patch $ppatch: kept as chosen"
                     else
                         report FAIL patch-pair "Tricky Store patch month $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)"
                     fi ;;
@@ -519,7 +519,7 @@ check_pif() {
             if [ "$pval" = "$ppatch" ]; then
                 report OK patch-pair "Tricky Store patch equals PIF patch $ppatch"
             elif [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then
-                report WARN patch-pair "custom patch $pval (set in the Patch page) differs from PIF patch $ppatch: kept as chosen, DEVICE integrity may fail"
+                report WARN patch-pair "custom patch $pval (pinned by a file in Box-Brain/Custom-Patch) differs from PIF patch $ppatch: kept as chosen, DEVICE integrity may fail"
             else
                 report FAIL patch-pair "Tricky Store patch $pval differs from PIF patch $ppatch (DEVICE integrity fails on this mismatch)"
             fi ;;
