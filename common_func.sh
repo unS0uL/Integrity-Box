@@ -501,7 +501,7 @@ handle_security_patch() {
   local PATCH_LOG="$LOGDIR/patch.log"
   local PATCH_FLAG="$BOX/patch"
   local SKIP_FILE="$BOX/skip"
-  local PATCH_DATE="2026-10-05"
+  local PATCH_DATE="2026-11-05"
   local PROP_MAIN="ro.build.version.security_patch"
   local FILE_PATH="/data/adb/tricky_store/security_patch.txt"
   local BRAND_PROP

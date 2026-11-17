@@ -374,6 +374,7 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
     cp "$MODPATH/toolkit/integrity_box_ui_settings" "$FLAG/integrity_box_ui_settings"
 fi
 
+[ -d "$TRICKY/keys" ] && rm -rf "$TRICKY/keys"
 cat <<EOF > $TRICKY/security_patch.txt
 all=2026-11-05
 EOF
