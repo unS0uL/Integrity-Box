@@ -583,6 +583,18 @@ handle_security_patch() {
 RESETPROP="resetprop -n"
 PROP_DELETE="resetprop --delete"
 PROP_WAIT="resetprop -w"
+
+# Wait until the system finished booting (max 10 minutes). Never write `$PROP_WAIT sys.boot_completed 0`: Magisk's
+# `resetprop -w NAME 0` waits until the value CHANGES from 0, but resetprop-rs `--wait NAME 0` waits until it EQUALS 0,
+# i.e. forever once the boot is done: service.sh hung on the first line and AutoPilot never started (2026-11-17).
+wait_boot_completed() {
+  _wb=0
+  while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ "$_wb" -lt 600 ]; do
+    sleep 1
+    _wb=$((_wb + 1))
+  done
+  return 0
+}
 PROP_DELETE_PERSIST="resetprop -p --delete"
 
 COMPACT_SUPPORTED=false

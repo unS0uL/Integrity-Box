@@ -69,6 +69,7 @@ for sh_ in sh dash bash; do
     step "test_pif_policy.sh under $sh_" env TEST_SH="$sh_" sh "$HERE/test_pif_policy.sh"
     step "test_action_pif.sh under $sh_" "$sh_" "$HERE/test_action_pif.sh"
     step "test_key_shim.sh under $sh_" "$sh_" "$HERE/test_key_shim.sh"
+    step "test_boot_wait.sh under $sh_" "$sh_" "$HERE/test_boot_wait.sh"
 done
 if command -v shellcheck >/dev/null 2>&1; then
     step "shellcheck" shellcheck -s sh webroot/common_scripts/doctor.sh webroot/common_scripts/autopilot.sh pif_policy.sh autopilot-v2/deploy_files.sh autopilot-v2/device_test.sh autopilot-v2/definition_of_done.sh autopilot-v2/build.sh autopilot-v2/verify_binary.sh
