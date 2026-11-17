@@ -4,476 +4,466 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>GMS Spoofing Manager</title>
-<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons+Round" rel="stylesheet">
 
 <style>
 :root{
-  --ios-bg: #0f1419;
-  --ios-surface: rgba(31, 34, 51, 0.85);
-  --ios-surface-solid: #1f2233;
-  --ios-grouped: rgba(35, 38, 55, 0.7);
-  --ios-border: rgba(21, 146, 255, 0.2);
-  --ios-blue: #1592FF;
-  --ios-blue-pressed: #0d7ad9;
-  --ios-blue-glow: rgba(21, 146, 255, 0.3);
-  --ios-green: #30D158;
-  --ios-red: #FF453A;
-  --ios-text: #e6e6e6;
-  --ios-text-secondary: rgba(230, 230, 230, 0.6);
-  --ios-text-tertiary: rgba(230, 230, 230, 0.35);
-  --ios-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(21, 146, 255, 0.1);
-  --ios-spring: cubic-bezier(0.32, 0.72, 0, 1);
-  --ios-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --bg:#1f2233;
+  --surface:#25283a;
+  --surface-2:#2b2f42;
+  --surface-3:#303449;
+  --border:#ffffff10;
+  --border-strong:#ffffff18;
+  --blue:#1592FF;
+  --blue-soft:#1592FF18;
+  --blue-border:#1592FF42;
+  --green:#30d158;
+  --red:#ff453a;
+  --text:#e6e6e6;
+  --secondary:#a9afc0;
+  --muted:#737a8e;
+  --overlay:#000000a8;
+  --radius:18px;
+}
+
+*{
+  box-sizing:border-box;
+  -webkit-tap-highlight-color:transparent;
+}
+
+html,
+body{
+  margin:0;
+  width:100%;
+  min-height:100%;
+  min-height:100dvh;
 }
 
 body{
-  margin:0;
-  min-height:100vh;
-  min-height:100dvh;
+  background:var(--bg);
+  color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  overflow-x:hidden;
+}
+
+button{
+  font:inherit;
+}
+
+.app{
+  width:100%;
+  max-width:480px;
+  margin:0 auto;
+  padding:18px 15px 28px;
+}
+
+.header{
+  display:flex;
+  align-items:center;
+  gap:13px;
+  padding:4px 3px 22px;
+}
+
+.header-icon{
+  width:46px;
+  height:46px;
+  flex:0 0 46px;
   display:flex;
   align-items:center;
   justify-content:center;
-  background: 
-    radial-gradient(ellipse at 0% 0%, rgba(21, 146, 255, 0.15) 0%, transparent 50%),
-    radial-gradient(ellipse at 100% 100%, rgba(21, 146, 255, 0.08) 0%, transparent 50%),
-    linear-gradient(135deg, #1c1e2b 0%, #10121c 100%);
-  background-attachment: fixed;
-  color:var(--ios-text);
-  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
-  padding:20px;
-  overflow-x: hidden;
+  border-radius:14px;
+  background:var(--blue);
+  color:#fff;
 }
 
-.container{
-  width: 100%;
-  max-width: 420px;
-  animation: slideUp 0.6s var(--ios-spring) forwards;
-  opacity: 0;
-  transform: translateY(20px);
+.header-icon .material-icons-round{
+  font-size:24px;
 }
 
-@keyframes slideUp {
-  to { opacity: 1; transform: translateY(0); }
+.header-content{
+  min-width:0;
 }
 
-.card{
-  background: var(--ios-surface);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border-radius: 28px;
-  padding: 24px;
-  border: 1px solid var(--ios-border);
-  box-shadow: var(--ios-shadow);
+.header-title{
+  font-size:18px;
+  line-height:1.2;
+  font-weight:750;
+  letter-spacing:-.025em;
 }
 
-h1{
-  margin: 0 0 8px;
-  text-align: center;
-  font-size: 22px;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
+.header-subtitle{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:12px;
+  font-weight:500;
 }
 
-h1 .material-icons{
-  font-size: 24px;
-  background: linear-gradient(135deg, var(--ios-blue), #5AC8FA);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+.section{
+  margin-bottom:14px;
 }
 
-.subheader{
-  text-align: center;
-  font-size: 13px;
-  color: var(--ios-text-secondary);
-  margin-bottom: 20px;
+.section-label{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:0 4px 8px;
+  color:var(--secondary);
+  font-size:11px;
+  font-weight:700;
+  text-transform:uppercase;
+  letter-spacing:.08em;
 }
 
-.rows{
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.section-label .material-icons-round{
+  color:var(--blue);
+  font-size:17px;
 }
 
-.item{
-  position: relative;
-  padding: 16px;
-  border-radius: 14px;
-  background: var(--ios-grouped);
-  border: 1px solid transparent;
-  cursor: pointer;
-  transition: all 0.3s var(--ios-spring);
-  overflow: hidden;
+.panel{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--radius);
+  overflow:hidden;
 }
 
-.item::before{
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(135deg, rgba(255,255,255,0.1), transparent);
-  opacity: 0;
-  transition: opacity 0.3s ease;
+.option{
+  position:relative;
+  width:100%;
+  min-height:76px;
+  padding:14px 15px;
+  display:flex;
+  align-items:center;
+  gap:12px;
+  background:transparent;
+  color:var(--text);
+  border:0;
+  text-align:left;
+  cursor:pointer;
+  transition:background .16s ease;
 }
 
-.item:hover{
-  transform: scale(1.02);
-  background: rgba(58, 58, 60, 0.7);
+.option + .option{
+  border-top:1px solid var(--border);
 }
 
-.item:hover::before{
-  opacity: 1;
+.option:active{
+  background:var(--surface-3);
 }
 
-.item:active{
-  transform: scale(0.98);
-  transition: transform 0.1s ease;
+.option-icon{
+  width:40px;
+  height:40px;
+  flex:0 0 40px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:12px;
+  background:var(--surface-2);
+  color:var(--secondary);
+  transition:.18s ease;
 }
 
-.item.active{
-  background: rgba(21, 146, 255, 0.15);
-  border: 1px solid rgba(21, 146, 255, 0.4);
-  box-shadow: 0 0 0 1px rgba(21, 146, 255, 0.2), 0 4px 20px rgba(21, 146, 255, 0.15);
+.option-icon .material-icons-round{
+  font-size:21px;
 }
 
-.item.active::after{
-  content: 'check_circle';
-  font-family: 'Material Icons';
-  position: absolute;
-  right: 16px;
-  top: 50%;
-  transform: translateY(-50%);
-  color: var(--ios-blue);
-  font-size: 20px;
-  animation: checkIn 0.4s var(--ios-spring-bounce) forwards;
+.option.active .option-icon{
+  background:var(--blue);
+  color:#fff;
 }
 
-.item.disabled-option{
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
+.option-content{
+  flex:1;
+  min-width:0;
 }
 
-@keyframes checkIn {
-  from { opacity: 0; transform: translateY(-50%) scale(0); }
-  to { opacity: 1; transform: translateY(-50%) scale(1); }
+.option-title{
+  font-size:14px;
+  font-weight:650;
+  line-height:1.25;
 }
 
-.title{
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  font-weight: 600;
-  font-size: 16px;
-  letter-spacing: -0.01em;
+.option-description{
+  margin-top:4px;
+  color:var(--muted);
+  font-size:11px;
+  line-height:1.4;
+  font-weight:500;
 }
 
-.title .material-icons{
-  font-size: 22px;
-  width: 28px;
-  height: 28px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 8px;
-  background: rgba(255,255,255,0.1);
-  color: var(--ios-text);
-  transition: all 0.3s ease;
+.option-check{
+  width:24px;
+  height:24px;
+  flex:0 0 24px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:var(--blue);
+  opacity:0;
+  transform:scale(.7);
+  transition:.18s ease;
 }
 
-.item.active .title .material-icons{
-  background: var(--ios-blue);
-  color: white;
-  box-shadow: 0 2px 8px rgba(21, 146, 255, 0.4);
+.option.active .option-check{
+  opacity:1;
+  transform:scale(1);
 }
 
-.subtitle{
-  margin-top: 6px;
-  margin-left: 40px;
-  font-size: 13px;
-  color: var(--ios-text-secondary);
-  line-height: 1.4;
-  font-weight: 400;
+.option.disabled-option{
+  opacity:.35;
+  pointer-events:none;
 }
 
-.note{
-  margin-top: 20px;
-  padding: 16px;
-  border-radius: 16px;
-  background: rgba(21, 146, 255, 0.1);
-  border: 1px solid rgba(21, 146, 255, 0.2);
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--ios-text-secondary);
+.info{
+  display:flex;
+  align-items:flex-start;
+  gap:11px;
+  margin:18px 2px 0;
+  padding:13px 14px;
+  border:1px solid var(--border);
+  border-radius:15px;
+  background:var(--surface);
 }
 
-.note b{
-  color: var(--ios-blue);
-  font-weight: 600;
-  display: block;
-  margin-bottom: 8px;
-  font-size: 14px;
+.info-icon{
+  color:var(--blue);
+  flex:0 0 auto;
+  margin-top:1px;
 }
 
-.note ul{
-  margin: 0;
-  padding-left: 16px;
-  list-style: none;
+.info-icon .material-icons-round{
+  font-size:18px;
 }
 
-.note li{
-  position: relative;
-  margin-bottom: 6px;
-  padding-left: 12px;
+.info-text{
+  color:var(--secondary);
+  font-size:11px;
+  line-height:1.55;
+  font-weight:500;
 }
 
-.note li::before{
-  content: '•';
-  position: absolute;
-  left: 0;
-  color: var(--ios-blue);
-  font-weight: bold;
-}
-
-.actions{
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 12px;
-  margin-top: 20px;
-}
-
-.btn{
-  padding: 14px;
-  border-radius: 14px;
-  text-align: center;
-  font-size: 13px;
-  font-weight: 600;
-  background: var(--ios-grouped);
-  cursor: pointer;
-  transition: all 0.3s var(--ios-spring);
-  border: 1px solid transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 6px;
-  color: var(--ios-text);
-}
-
-.btn .material-icons{
-  font-size: 20px;
-  color: var(--ios-text-secondary);
-  transition: color 0.3s ease;
-}
-
-.btn:hover{
-  background: rgba(58, 58, 60, 0.8);
-  transform: translateY(-2px);
-}
-
-.btn:hover .material-icons{
-  color: var(--ios-text);
-}
-
-.btn:active{
-  transform: scale(0.96);
-}
-
-.btn-primary{
-  background: rgba(21, 146, 255, 0.15);
-  border-color: rgba(21, 146, 255, 0.3);
-}
-
-.btn-primary .material-icons{
-  color: var(--ios-blue);
-}
-
-.btn-primary:hover{
-  background: rgba(21, 146, 255, 0.25);
+.info-text strong{
+  color:var(--text);
+  font-weight:650;
 }
 
 .footer{
-  text-align: center;
-  margin-top: 20px;
-  font-size: 12px;
-  color: var(--ios-text-tertiary);
-  font-weight: 500;
-  letter-spacing: 0.02em;
+  margin-top:20px;
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:10px;
+}
+
+.footer-text{
+  color:var(--muted);
+  font-size:10px;
+  font-weight:500;
+}
+
+.reboot-button{
+  height:43px;
+  padding:0 17px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  gap:8px;
+  border:1px solid var(--blue-border);
+  border-radius:13px;
+  background:var(--blue-soft);
+  color:var(--blue);
+  font-size:12px;
+  font-weight:700;
+  cursor:pointer;
+  transition:.18s ease;
+}
+
+.reboot-button .material-icons-round{
+  font-size:19px;
+}
+
+.reboot-button:active{
+  transform:scale(.96);
+  background:#1592ff25;
 }
 
 #loader{
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.8);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 999;
-  opacity: 0;
-  transition: opacity 0.3s ease;
+  position:fixed;
+  inset:0;
+  z-index:9999;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  background:var(--overlay);
+  opacity:0;
+  transition:opacity .2s ease;
 }
 
 #loader.show{
-  display: flex;
-  opacity: 1;
+  opacity:1;
 }
 
-.loader-content{
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 16px;
+.loader-box{
+  width:150px;
+  padding:20px 15px;
+  border-radius:18px;
+  background:var(--surface);
+  border:1px solid var(--border-strong);
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  justify-content:center;
+  gap:13px;
 }
 
 .spinner{
-  width: 48px;
-  height: 48px;
-  border: 3px solid rgba(255,255,255,0.1);
-  border-top-color: var(--ios-blue);
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  box-shadow: 0 0 20px rgba(21, 146, 255, 0.3);
+  width:32px;
+  height:32px;
+  border:3px solid #ffffff12;
+  border-top-color:var(--blue);
+  border-radius:50%;
+  animation:spin .75s linear infinite;
 }
 
 .loader-text{
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ios-text-secondary);
-  animation: pulse 1.5s ease-in-out infinite;
+  color:var(--secondary);
+  font-size:11px;
+  font-weight:600;
 }
 
-@keyframes spin{ to { transform: rotate(360deg); } }
-@keyframes pulse{ 
-  0%, 100% { opacity: 0.6; }
-  50% { opacity: 1; }
-}
-
-.webui-popup {
-  pointer-events: none;
-}
-
-.control-header{
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  margin-bottom: 20px;
-  padding: 8px 16px;
-  background: rgba(21, 146, 255, 0.1);
-  border: 1px solid rgba(21, 146, 255, 0.2);
-  border-radius: 20px;
-  width: fit-content;
-  margin-left: auto;
-  margin-right: auto;
-}
-
-.control-header .material-icons{
-  font-size: 16px;
-  color: var(--ios-blue);
-}
-
-.control-header span{
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ios-blue);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+@keyframes spin{
+  to{transform:rotate(360deg)}
 }
 
 .modal-overlay{
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.7);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  display: none;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-  opacity: 0;
-  transition: opacity 0.3s ease;
+  position:fixed;
+  inset:0;
+  z-index:10000;
+  display:none;
+  align-items:flex-end;
+  justify-content:center;
+  padding:12px;
+  background:var(--overlay);
+  opacity:0;
+  transition:opacity .2s ease;
 }
 
 .modal-overlay.show{
-  display: flex;
-  opacity: 1;
+  opacity:1;
 }
 
 .modal{
-  background: var(--ios-surface);
-  border-radius: 20px;
-  padding: 24px;
-  max-width: 320px;
-  width: 90%;
-  border: 1px solid var(--ios-border);
-  box-shadow: var(--ios-shadow);
-  transform: scale(0.9);
-  transition: transform 0.3s var(--ios-spring);
+  width:100%;
+  max-width:460px;
+  padding:19px;
+  border-radius:22px;
+  background:var(--surface);
+  border:1px solid var(--border-strong);
+  transform:translateY(20px);
+  transition:transform .22s ease;
 }
 
 .modal-overlay.show .modal{
-  transform: scale(1);
+  transform:translateY(0);
+}
+
+.modal-handle{
+  width:34px;
+  height:4px;
+  margin:-5px auto 18px;
+  border-radius:10px;
+  background:#ffffff18;
+}
+
+.modal-icon{
+  width:46px;
+  height:46px;
+  margin:0 auto 12px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border-radius:14px;
+  background:var(--blue-soft);
+  color:var(--blue);
+}
+
+.modal-icon .material-icons-round{
+  font-size:24px;
 }
 
 .modal-title{
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 12px;
-  text-align: center;
+  text-align:center;
+  font-size:17px;
+  font-weight:750;
 }
 
 .modal-text{
-  font-size: 14px;
-  color: var(--ios-text-secondary);
-  line-height: 1.5;
-  margin-bottom: 20px;
-  text-align: center;
+  margin:7px auto 19px;
+  max-width:330px;
+  color:var(--secondary);
+  text-align:center;
+  font-size:11px;
+  line-height:1.55;
 }
 
 .modal-buttons{
-  display: flex;
-  gap: 10px;
+  display:grid;
+  grid-template-columns:1fr 1fr;
+  gap:9px;
 }
 
 .modal-btn{
-  flex: 1;
-  padding: 12px;
-  border-radius: 12px;
-  text-align: center;
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  border: none;
-  background: var(--ios-grouped);
-  color: var(--ios-text);
-}
-
-.modal-btn:hover{
-  background: rgba(58, 58, 60, 0.8);
+  height:44px;
+  border:1px solid var(--border);
+  border-radius:13px;
+  background:var(--surface-2);
+  color:var(--secondary);
+  font-size:12px;
+  font-weight:650;
+  cursor:pointer;
 }
 
 .modal-btn:active{
-  transform: scale(0.96);
+  transform:scale(.97);
 }
 
 .modal-btn.confirm{
-  background: rgba(21, 146, 255, 0.2);
-  color: var(--ios-blue);
+  border-color:var(--blue-border);
+  background:var(--blue);
+  color:#fff;
 }
 
-.modal-btn.confirm:hover{
-  background: rgba(21, 146, 255, 0.3);
+.webui-popup{
+  pointer-events:none;
 }
 
-@media (max-width: 380px) {
-  .card { padding: 20px; }
-  h1 { font-size: 20px; }
-  .actions { grid-template-columns: 1fr; }
+@media(max-width:360px){
+  .app{
+    padding-left:11px;
+    padding-right:11px;
+  }
+
+  .header{
+    padding-bottom:18px;
+  }
+
+  .option{
+    min-height:72px;
+    padding:12px;
+  }
+
+  .footer{
+    align-items:stretch;
+    flex-direction:column;
+  }
+
+  .reboot-button{
+    width:100%;
+  }
+
+  .footer-text{
+    text-align:center;
+  }
 }
 </style>
 </head>
@@ -481,7 +471,7 @@ h1 .material-icons{
 <body>
 
 <div id="loader">
-  <div class="loader-content">
+  <div class="loader-box">
     <div class="spinner"></div>
     <div class="loader-text">Applying changes...</div>
   </div>
@@ -489,314 +479,628 @@ h1 .material-icons{
 
 <div class="modal-overlay" id="rebootModal">
   <div class="modal">
+
+    <div class="modal-handle"></div>
+
+    <div class="modal-icon">
+      <span class="material-icons-round">restart_alt</span>
+    </div>
+
     <div class="modal-title">Reboot Device?</div>
-    <div class="modal-text">Are you sure you want to reboot your device now? All changes will take effect after reboot.</div>
+
+    <div class="modal-text">
+      A reboot is required for the spoofing configuration changes to take effect.
+    </div>
+
     <div class="modal-buttons">
       <button class="modal-btn" onclick="closeRebootModal()">Cancel</button>
       <button class="modal-btn confirm" onclick="confirmReboot()">Reboot</button>
     </div>
+
   </div>
 </div>
 
-<div class="container">
-<div class="card">
+<main class="app">
 
-<div class="control-header">
-  <span>Configuration Panel</span>
-</div>
+  <header class="header">
 
-<h1>
-  <span class="material-icons">verified</span>
-  Inbuilt GMS Spoofing Manager
-</h1>
+    <div class="header-icon">
+      <span class="material-icons-round">verified</span>
+    </div>
 
-<div class="subheader">Powered by IntegrityBox</div>
+    <div class="header-content">
+      <div class="header-title">GMS Spoofing Manager</div>
+      <div class="header-subtitle">Inbuilt spoofing configuration</div>
+    </div>
 
-<div class="rows" id="profiles"></div>
+  </header>
 
-<div class="note">
-<b>Notes</b>
-<ul>
-  <li>These are for custom ROM users only</li>
-  <li>Recommended to choose both Disable option</li>
-  <li>Reboot required for changes</li>
-</ul>
-</div>
+  <section class="section">
 
-<div class="actions">
-  <div class="btn btn-primary" onclick="showRebootModal()">
-    <span class="material-icons">restart_alt</span>
-    Reboot Device
+    <div class="section-label">
+      <span class="material-icons-round">apps</span>
+      Google Play Services
+    </div>
+
+    <div class="panel" id="gmsProfiles"></div>
+
+  </section>
+
+  <section class="section">
+
+    <div class="section-label">
+      <span class="material-icons-round">shopping_bag</span>
+      Google Play Store
+    </div>
+
+    <div class="panel" id="vendingProfiles"></div>
+
+  </section>
+
+  <div class="info">
+
+    <div class="info-icon">
+      <span class="material-icons-round">info</span>
+    </div>
+
+    <div class="info-text">
+      These options are intended for <strong>custom ROM users</strong>.
+      Choose the desired spoofing state and reboot the device to apply the change.
+    </div>
+
   </div>
-</div>
 
-<div class="footer">© IntegrityBox • 2026</div>
-</div>
-</div>
+  <footer class="footer">
+
+    <button class="reboot-button" onclick="showRebootModal()">
+      <span class="material-icons-round">restart_alt</span>
+      Reboot Device
+    </button>
+
+  </footer>
+
+</main>
 
 <script>
-const BASE_DIR = "/data/adb/Box-Brain";
-const FILES = {
-  enablegms: `${BASE_DIR}/enablegms`,
-  disablegms: `${BASE_DIR}/disablegms`,
-  enablevending: `${BASE_DIR}/enablevending`,
-  disablevending: `${BASE_DIR}/disablevending`
+const BASE_DIR="/data/adb/Box-Brain";
+
+const FILES={
+  enablegms:`${BASE_DIR}/enablegms`,
+  disablegms:`${BASE_DIR}/disablegms`,
+  enablevending:`${BASE_DIR}/enablevending`,
+  disablevending:`${BASE_DIR}/disablevending`
 };
 
-const CONFLICTS = {
-  enablegms: ["disablegms"],
-  disablegms: ["enablegms"],
-  enablevending: ["disablevending"],
-  disablevending: ["enablevending"]
-};
+const COOLDOWN=1000;
 
-const COOLDOWN = 1000;
-let lastSwitch = 0;
+let lastSwitch=0;
 
-const options = [
-  { 
-    id: "enablegms",
-    name: "Enable Device Spoofing", 
-    icon: "apps", 
-    desc: "Resume ROM's inbuilt spoofing",
-    group: "gms"
+const options=[
+  {
+    id:"enablegms",
+    name:"Enable Device Spoofing",
+    icon:"apps",
+    desc:"Resume the ROM's inbuilt GMS spoofing",
+    group:"gms"
   },
-  { 
-    id: "disablegms",
-    name: "Disable Device Spoofing", 
-    icon: "apps_outage", 
-    desc: "Pause ROM's inbuilt spoofing",
-    group: "gms"
+  {
+    id:"disablegms",
+    name:"Disable Device Spoofing",
+    icon:"apps_outage",
+    desc:"Pause the ROM's inbuilt GMS spoofing",
+    group:"gms"
   },
-  { 
-    id: "enablevending",
-    name: "Enable Play Store Spoofing", 
-    icon: "shopping_bag", 
-    desc: "Resume ROM's inbuilt vending spoofing",
-    group: "vending"
+  {
+    id:"enablevending",
+    name:"Enable Play Store Spoofing",
+    icon:"shopping_bag",
+    desc:"Resume the ROM's inbuilt Play Store spoofing",
+    group:"vending"
   },
-  { 
-    id: "disablevending",
-    name: "Disable Play Store Spoofing", 
-    icon: "shopping_bag", 
-    desc: "Pause ROM's inbuilt vending spoofing",
-    group: "vending"
+  {
+    id:"disablevending",
+    name:"Disable Play Store Spoofing",
+    icon:"shopping_bag",
+    desc:"Pause the ROM's inbuilt Play Store spoofing",
+    group:"vending"
   }
 ];
 
-function popup(msg, type="info") {
-  try {
-    if (typeof window.toast === "function") { window.toast(String(msg)); return; }
-    if (window.kernelsu && typeof window.kernelsu.toast === "function") { window.kernelsu.toast(String(msg)); return; }
-    if (typeof ksu === "object" && typeof ksu.toast === "function") { ksu.toast(String(msg)); return; }
-  } catch {}
+function popup(msg,type="info"){
+  try{
+    if(typeof window.toast==="function"){
+      window.toast(String(msg));
+      return;
+    }
 
-  const n = document.createElement("div");
-  n.className = "webui-popup";
-  n.textContent = msg;
-  const colors = { 
-    error: { bg: "#FF453A", shadow: "rgba(255, 69, 58, 0.3)" }, 
-    success: { bg: "#30D158", shadow: "rgba(48, 209, 88, 0.3)" }, 
-    info: { bg: "#1592FF", shadow: "rgba(21, 146, 255, 0.3)" }
+    if(
+      window.kernelsu &&
+      typeof window.kernelsu.toast==="function"
+    ){
+      window.kernelsu.toast(String(msg));
+      return;
+    }
+
+    if(
+      typeof ksu==="object" &&
+      typeof ksu.toast==="function"
+    ){
+      ksu.toast(String(msg));
+      return;
+    }
+  }catch{}
+
+  const n=document.createElement("div");
+
+  n.className="webui-popup";
+  n.textContent=msg;
+
+  const colors={
+    error:{
+      bg:"#FF453A",
+      shadow:"rgba(255,69,58,.3)"
+    },
+    success:{
+      bg:"#30D158",
+      shadow:"rgba(48,209,88,.3)"
+    },
+    info:{
+      bg:"#1592FF",
+      shadow:"rgba(21,146,255,.3)"
+    }
   };
-  const style = colors[type] || colors.info;
-  
-  Object.assign(n.style, {
-    position:"fixed", 
-    top:"-100px", 
-    left:"50%", 
+
+  const c=colors[type]||colors.info;
+
+  Object.assign(n.style,{
+    position:"fixed",
+    top:"-100px",
+    left:"50%",
     transform:"translateX(-50%)",
-    background: style.bg, 
-    color:"#fff", 
-    padding:"14px 24px",
-    borderRadius:"14px", 
-    fontWeight:"600", 
-    fontSize:"15px",
+    background:c.bg,
+    color:"#fff",
+    padding:"12px 19px",
+    borderRadius:"13px",
+    fontWeight:"650",
+    fontSize:"13px",
     zIndex:"99999",
-    boxShadow:`0 8px 24px ${style.shadow}`,
-    transition:"all 0.4s cubic-bezier(0.32, 0.72, 0, 1)", 
+    boxShadow:`0 8px 24px ${c.shadow}`,
+    transition:"all .35s cubic-bezier(.32,.72,0,1)",
     opacity:"0",
-    backdropFilter: "blur(10px)",
-    border: "1px solid rgba(255,255,255,0.1)"
+    border:"1px solid rgba(255,255,255,.1)"
   });
-  
+
   document.body.appendChild(n);
-  requestAnimationFrame(()=>{ n.style.top="60px"; n.style.opacity="1"; });
-  setTimeout(()=>{ 
-    n.style.top="-100px"; 
-    n.style.opacity="0"; 
-    setTimeout(()=>n.remove(), 400); 
-  }, 2800);
+
+  requestAnimationFrame(()=>{
+    n.style.top="45px";
+    n.style.opacity="1";
+  });
+
+  setTimeout(()=>{
+    n.style.top="-100px";
+    n.style.opacity="0";
+
+    setTimeout(()=>{
+      n.remove();
+    },350);
+  },2600);
 }
 
-function showLoader(show, text = "Applying changes..."){
-  const loader = document.getElementById("loader");
-  const loaderText = loader.querySelector(".loader-text");
-  if(text) loaderText.textContent = text;
-  
+function showLoader(show,text="Applying changes..."){
+  const loader=document.getElementById("loader");
+  const loaderText=loader.querySelector(".loader-text");
+
+  if(text){
+    loaderText.textContent=text;
+  }
+
   if(show){
-    loader.style.display = "flex";
-    requestAnimationFrame(() => loader.classList.add("show"));
-  } else {
+    loader.style.display="flex";
+
+    requestAnimationFrame(()=>{
+      loader.classList.add("show");
+    });
+  }else{
     loader.classList.remove("show");
-    setTimeout(() => loader.style.display = "none", 300);
+
+    setTimeout(()=>{
+      loader.style.display="none";
+    },200);
   }
 }
 
 function sh(cmd){
-  try { return ksu.exec(cmd); } catch { return ""; }
+  try{
+    return ksu.exec(cmd);
+  }catch{
+    return "";
+  }
 }
 
 async function getActiveFiles(){
-  const active = [];
-  for (const key in FILES) {
-    const exists = sh(`test -f "${FILES[key]}" && echo yes`).trim() === "yes";
-    if (exists) active.push(key);
+  const active=[];
+
+  for(const key in FILES){
+    const exists=
+      sh(`test -f "${FILES[key]}" && echo yes`).trim()==="yes";
+
+    if(exists){
+      active.push(key);
+    }
   }
+
   return active;
 }
 
 async function validateFiles(){
-  const active = await getActiveFiles();
-  if (active.length > 2) {
-    showLoader(true, "Resetting configuration...");
-    for (const key in FILES) {
+  const active=await getActiveFiles();
+
+  if(active.length>2){
+    showLoader(true,"Resetting configuration...");
+
+    for(const key in FILES){
       sh(`rm -f "${FILES[key]}"`);
     }
-    popup("Too many options selected. All settings cleared.", "error");
+
+    popup(
+      "Too many options selected. All settings cleared.",
+      "error"
+    );
+
     showLoader(false);
+
     return [];
   }
+
   return active;
 }
 
-function getConflictingOptions(activeFiles, optionId){
-  const conflicts = [];
-  const optionGroup = options.find(o => o.id === optionId).group;
-  
-  for (const active of activeFiles) {
-    const activeOption = options.find(o => o.id === active);
-    if (activeOption.group === optionGroup && active !== optionId) {
+function getConflictingOptions(activeFiles,optionId){
+  const conflicts=[];
+
+  const option=options.find(
+    o=>o.id===optionId
+  );
+
+  if(!option){
+    return conflicts;
+  }
+
+  for(const active of activeFiles){
+
+    const activeOption=options.find(
+      o=>o.id===active
+    );
+
+    if(
+      activeOption &&
+      activeOption.group===option.group &&
+      active!==optionId
+    ){
       conflicts.push(active);
     }
   }
-  
+
   return conflicts;
 }
 
 async function toggleOption(optionId){
-  if(Date.now() - lastSwitch < COOLDOWN){
-    popup("Please wait before switching again", "error");
+
+  if(Date.now()-lastSwitch<COOLDOWN){
+    popup(
+      "Please wait before switching again",
+      "error"
+    );
+
     return;
   }
-  lastSwitch = Date.now();
 
-  const activeFiles = await getActiveFiles();
-  const isCurrentlyActive = activeFiles.includes(optionId);
-  
-  if (!isCurrentlyActive) {
-    const conflicts = getConflictingOptions(activeFiles, optionId);
-    if (conflicts.length > 0) {
-      popup("Cannot select opposite option. Deselect conflicting option first.", "error");
+  lastSwitch=Date.now();
+
+  const activeFiles=await getActiveFiles();
+
+  const isCurrentlyActive=
+    activeFiles.includes(optionId);
+
+  if(!isCurrentlyActive){
+
+    const conflicts=
+      getConflictingOptions(
+        activeFiles,
+        optionId
+      );
+
+    if(conflicts.length>0){
+      popup(
+        "Cannot select the opposite option. Deselect it first.",
+        "error"
+      );
+
       return;
     }
-    
-    if (activeFiles.length >= 2) {
-      popup("Maximum 2 options allowed. Deselect one first.", "error");
+
+    if(activeFiles.length>=2){
+      popup(
+        "Maximum 2 options allowed. Deselect one first.",
+        "error"
+      );
+
       return;
     }
   }
 
-  showLoader(true, isCurrentlyActive ? "Disabling..." : "Enabling...");
-  popup(`${isCurrentlyActive ? '👎' : '👍'} ${options.find(o => o.id === optionId).name}...`, "info");
+  const selected=options.find(
+    o=>o.id===optionId
+  );
 
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
-        if (isCurrentlyActive) {
+  showLoader(
+    true,
+    isCurrentlyActive
+      ?"Disabling..."
+      :"Enabling..."
+  );
+
+  popup(
+    `${isCurrentlyActive?"👎":"👍"} ${selected.name}...`,
+    "info"
+  );
+
+  requestAnimationFrame(()=>{
+    setTimeout(()=>{
+
+      try{
+
+        if(isCurrentlyActive){
+
           sh(`rm -f "${FILES[optionId]}"`);
-          popup("Reboot to apply changes", "success");
-        } else {
-          sh(`touch "${FILES[optionId]}" && chmod 0644 "${FILES[optionId]}"`);
-          popup("Reboot to apply changes", "success");
+
+          popup(
+            "Reboot to apply changes",
+            "success"
+          );
+
+        }else{
+
+          sh(
+            `touch "${FILES[optionId]}" && chmod 0644 "${FILES[optionId]}"`
+          );
+
+          popup(
+            "Reboot to apply changes",
+            "success"
+          );
         }
-      } catch (e) {
-        popup("Failed to apply changes", "error");
+
+      }catch(e){
+
+        popup(
+          "Failed to apply changes",
+          "error"
+        );
       }
-      
+
       showLoader(false);
       render();
-    }, 0);
+
+    },0);
+  });
+}
+
+function createOption(option,isActive,isDisabled){
+
+  const button=document.createElement("button");
+
+  button.type="button";
+
+  button.className=
+    "option"+
+    (isActive?" active":"")+
+    (isDisabled?" disabled-option":"");
+
+  button.innerHTML=`
+    <div class="option-icon">
+      <span class="material-icons-round">
+        ${option.icon}
+      </span>
+    </div>
+
+    <div class="option-content">
+
+      <div class="option-title">
+        ${option.name}
+      </div>
+
+      <div class="option-description">
+        ${option.desc}
+      </div>
+
+    </div>
+
+    <div class="option-check">
+      <span class="material-icons-round">
+        check_circle
+      </span>
+    </div>
+  `;
+
+  if(!isDisabled){
+    button.addEventListener(
+      "click",
+      ()=>toggleOption(option.id)
+    );
+  }
+
+  return button;
+}
+
+async function render(){
+
+  await validateFiles();
+
+  const activeFiles=await getActiveFiles();
+
+  const gmsRoot=
+    document.getElementById("gmsProfiles");
+
+  const vendingRoot=
+    document.getElementById("vendingProfiles");
+
+  gmsRoot.innerHTML="";
+  vendingRoot.innerHTML="";
+
+  options.forEach(option=>{
+
+    const isActive=
+      activeFiles.includes(option.id);
+
+    const conflicts=
+      getConflictingOptions(
+        activeFiles,
+        option.id
+      );
+
+    const isDisabled=
+      !isActive &&
+      conflicts.length>0;
+
+    const element=
+      createOption(
+        option,
+        isActive,
+        isDisabled
+      );
+
+    if(option.group==="gms"){
+      gmsRoot.appendChild(element);
+    }else{
+      vendingRoot.appendChild(element);
+    }
+
   });
 }
 
 function showRebootModal(){
-  document.getElementById("rebootModal").classList.add("show");
+  document
+    .getElementById("rebootModal")
+    .style.display="flex";
+
+  requestAnimationFrame(()=>{
+    document
+      .getElementById("rebootModal")
+      .classList.add("show");
+  });
 }
 
 function closeRebootModal(){
-  document.getElementById("rebootModal").classList.remove("show");
+
+  const modal=
+    document.getElementById("rebootModal");
+
+  modal.classList.remove("show");
+
+  setTimeout(()=>{
+    modal.style.display="none";
+  },200);
 }
 
 function confirmReboot(){
+
   closeRebootModal();
-  showLoader(true, "Rebooting...");
-  popup("Rebooting device...", "info");
-  
-  requestAnimationFrame(() => {
-    setTimeout(() => {
-      try {
+
+  showLoader(
+    true,
+    "Rebooting..."
+  );
+
+  popup(
+    "Rebooting device...",
+    "info"
+  );
+
+  requestAnimationFrame(()=>{
+
+    setTimeout(()=>{
+
+      try{
+
         sh("reboot");
-      } catch (e) {
-        popup("Reboot command failed", "error");
+
+      }catch(e){
+
+        popup(
+          "Reboot command failed",
+          "error"
+        );
+
         showLoader(false);
       }
-    }, 1000);
+
+    },1000);
   });
 }
 
-async function render(){
-  await validateFiles();
-  const activeFiles = await getActiveFiles();
-  const root = document.getElementById("profiles");
-  root.innerHTML = "";
+document
+  .getElementById("rebootModal")
+  .addEventListener(
+    "click",
+    event=>{
 
-  options.forEach((opt, index) => {
-    const isActive = activeFiles.includes(opt.id);
-    const conflicts = getConflictingOptions(activeFiles, opt.id);
-    const isDisabled = !isActive && conflicts.length > 0;
-    
-    const d = document.createElement("div");
-    d.className = "item " + (isActive ? "active" : "") + (isDisabled ? " disabled-option" : "");
-    d.style.animationDelay = `${index * 0.1}s`;
-    d.innerHTML = `
-      <div class="title">
-        <span class="material-icons">${opt.icon}</span>${opt.name}
-      </div>
-      <div class="subtitle">${opt.desc}${isDisabled ? ' • Conflict with selected option' : ''}</div>
-    `;
-    
-    if (!isDisabled) {
-      d.onclick = () => toggleOption(opt.id);
+      if(
+        event.target.id==="rebootModal"
+      ){
+        closeRebootModal();
+      }
+
     }
-    
-    root.appendChild(d);
-  });
-}
+  );
 
-document.addEventListener("DOMContentLoaded", render);
+document.addEventListener(
+  "keydown",
+  event=>{
+
+    if(event.key==="Escape"){
+      closeRebootModal();
+    }
+
+  }
+);
+
+document.addEventListener(
+  "DOMContentLoaded",
+  render
+);
 </script>
+
 <script src="../TRANSLATIONS/meow.js"></script>
+
 <script>
 (function(){
-  var lang = localStorage.getItem('ibLang') || 'en';
-  if (lang !== 'en') {
-    var s = document.createElement('script');
-    s.src = '../TRANSLATIONS/' + lang + '.js';
-    s.onload = function(){ if(window.i18nBoot) window.i18nBoot(); };
+
+  var lang=
+    localStorage.getItem("ibLang")||"en";
+
+  if(lang!=="en"){
+
+    var s=
+      document.createElement("script");
+
+    s.src=
+      "../TRANSLATIONS/"+lang+".js";
+
+    s.onload=function(){
+
+      if(window.i18nBoot){
+        window.i18nBoot();
+      }
+
+    };
+
     document.head.appendChild(s);
   }
+
 })();
 </script>
+
 </body>
 </html>

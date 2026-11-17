@@ -1,3 +1,50 @@
+OPTIMISE="$MODPATH/webroot/common_scripts/hehe.sh"
+
+check_ksun() {
+    KSUN_FLAG="/data/adb/Box-Brain/ksun"
+    KSUD="/data/adb/ksud"
+
+    rm -f "$KSUN_FLAG"
+
+    [ -x "$KSUD" ] || return 0
+
+    HELP="$("$KSUD" --help 2>/dev/null)"
+    case "$HELP" in
+        *"KernelSU Next userspace cli"*) ;;
+        *) return 0 ;;
+    esac
+
+    VERSION_OUTPUT="$("$KSUD" -V 2>/dev/null)"
+    VERSION="$(printf '%s\n' "$VERSION_OUTPUT" |
+        sed -n 's/^ksud \([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' |
+        head -n 1)"
+
+    [ -n "$VERSION" ] || return 0
+
+    MAJOR="${VERSION%%.*}"
+    REST="${VERSION#*.}"
+    MINOR="${REST%%.*}"
+    PATCH="${REST#*.}"
+
+    if [ "$MAJOR" -gt 3 ] ||
+        { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -gt 4 ]; } ||
+        { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -eq 4 ] && [ "$PATCH" -ge 0 ]; }; then
+        if [ "$MAJOR" -gt 3 ] ||
+            [ "$MINOR" -gt 4 ] ||
+            [ "$PATCH" -ge 0 ]; then
+            mkdir -p /data/adb/Box-Brain
+            : > "$KSUN_FLAG"
+        fi
+    fi
+
+    return 0
+}
+
+check_ksun >/dev/null 2>&1 || true
+
+if [ -f "/data/adb/Box-Brain/ksun" ]; then
+    "$OPTIMISE" >/dev/null 2>&1 || true
+fi
 
 # Skip on pixel mode
 if [ -e "/sdcard/zygisk" ] || [ -e "/data/adb/Box-Brain/zygisk" ]; then

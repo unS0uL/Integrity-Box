@@ -374,11 +374,9 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
     cp "$MODPATH/toolkit/integrity_box_ui_settings" "$FLAG/integrity_box_ui_settings"
 fi
 
-if [ ! -f $TRICKY/security_patch.txt ]; then
 cat <<EOF > $TRICKY/security_patch.txt
 all=2026-11-05
 EOF
-fi
  
 install_module
 

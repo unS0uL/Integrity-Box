@@ -308,7 +308,11 @@ if [ -d "$OMK_MODULE" ] && [ ! -f "$OMK_MODULE/disable" ]; then
             fi
         fi
     else
-        log " ✦ Oh My KeyMint keybox update is disabled by user"
+        echo "----------------------------------------"
+        log " ✦ OhMyKeyMint keybox update is disabled by user"
+        log "    DO THIS TO ENABLE :"
+        log "    WebUI -> Customise Scope -> Keybox"
+        echo "----------------------------------------"
     fi
 fi
 
@@ -327,6 +331,10 @@ if [ -d "$SIM_MODULE" ] && [ ! -f "$SIM_MODULE/disable" ]; then
             fi
         fi
     else
+        echo "----------------------------------------"
         log " ✦ TEE-SIM keybox update is disabled by user"
+        log "    DO THIS TO ENABLE :"
+        log "    WebUI -> Customise Scope -> Keybox"
+        echo "----------------------------------------"
     fi
 fi

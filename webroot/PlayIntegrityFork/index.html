@@ -123,6 +123,7 @@ h1 .material-icons{
 }
 .section-label.behaviour::before{background:var(--warning)}
 .section-label.behaviour{color:var(--warning)}
+.section-label.behaviour:not(:first-child){margin-top:26px;}
 .row{
  position:relative;z-index:2;
  display:flex;
@@ -150,10 +151,10 @@ h1 .material-icons{
  box-shadow:0 0 20px rgba(77,163,255,0.15);
 }
 .row.active .icon-wrap{
- background:var(--accent);
- box-shadow:0 4px 16px var(--accent-glow);
+ background:rgba(77,163,255,0.12);
+ box-shadow:none;
 }
-.row.active .icon-wrap .material-icons{color:white}
+.row.active .icon-wrap .material-icons{color:var(--accent)}
 .row.active .title{color:var(--accent)}
 .row.active .status-dot{
  background:var(--success);
@@ -242,6 +243,8 @@ h1 .material-icons{
  box-shadow:0 8px 24px rgba(77,163,255,0.2);
 }
 .action-btn:active{transform:scale(0.98)}
+.action-btn{white-space:nowrap;flex-wrap:nowrap}
+.action-btn span:last-child{white-space:nowrap}
 .action-btn .material-icons{
  font-size:20px;color:var(--accent);
  animation:spin 4s linear infinite;
@@ -258,6 +261,8 @@ h1 .material-icons{
  position:relative;z-index:2;
 }
 .toast{
+ width:max-content;max-width:calc(100vw - 32px);
+ white-space:nowrap;flex-wrap:nowrap;
  position:fixed;left:50%;bottom:30px;
  transform:translateX(-50%) translateY(20px);
  background:rgba(30,33,60,0.95);
@@ -270,7 +275,8 @@ h1 .material-icons{
  display:flex;align-items:center;gap:10px;
 }
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
-.toast .material-icons{font-size:20px;color:var(--success)}
+.toast .material-icons{font-size:20px;color:var(--success);flex-shrink:0}
+.toast span:last-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
 
 .row-group{
  background:rgba(255,255,255,0.03);
@@ -406,11 +412,129 @@ h1 .material-icons{
  margin-top:0;
 }
 
+.zygisk-card{
+ position:relative;z-index:2;
+ display:flex;
+ align-items:center;
+ justify-content:space-between;
+ gap:14px;
+ padding:18px 20px;
+ border-radius:16px;
+ background:rgba(255,255,255,0.03);
+ border:1px solid rgba(255,255,255,0.06);
+ margin-bottom:24px;
+ cursor:pointer;
+ transition:all 0.25s cubic-bezier(0.4,0,0.2,1);
+}
+.zygisk-card:hover{
+ background:rgba(255,255,255,0.06);
+ transform:translateY(-2px);
+ box-shadow:0 8px 24px rgba(0,0,0,0.3);
+ border-color:rgba(77,163,255,0.2);
+}
+.zygisk-card:active{transform:scale(0.98)}
+.zygisk-card.paused{
+ background:rgba(255,77,77,0.08);
+ border-color:rgba(255,77,77,0.3);
+}
+.zygisk-card.paused:hover{
+ background:rgba(255,77,77,0.12);
+ border-color:rgba(255,77,77,0.4);
+}
+.zygisk-card.paused .icon-wrap{
+ background:var(--danger);
+ box-shadow:0 4px 16px rgba(255,77,77,0.3);
+}
+.zygisk-card.paused .icon-wrap .material-icons{color:white}
+.zygisk-card.paused .title{color:var(--danger)}
+.zygisk-card.paused .status-dot{
+ background:var(--danger);
+ box-shadow:0 0 12px var(--danger);
+}
+.zygisk-card .content{flex:1;min-width:0}
+.zygisk-card .title{
+ font-size:15px;font-weight:600;
+ color:var(--fg);margin-bottom:3px;
+ transition:color 0.3s;
+}
+.zygisk-card .subtitle-text{
+ font-size:12px;color:var(--text2);
+ font-weight:500;line-height:1.3;
+}
+
 @media(max-width:420px){
  .card{width:100%;padding:22px}
  .row{padding:14px}
  .icon-wrap{width:40px;height:40px}
+ .zygisk-card{padding:16px}
 }
+
+.row{
+  gap:12px;
+  padding:12px 14px;
+}
+.row-group{
+  margin-bottom:18px;
+}
+.row-group .row{
+  min-height:58px;
+  padding:9px 14px;
+}
+.icon-wrap{
+  width:40px;
+  height:40px;
+  border:1px solid rgba(255,255,255,0.05);
+  border-radius:11px;
+}
+.icon-wrap .material-icons{
+  font-size:24px;
+}
+.row.active .icon-wrap{
+  background:rgba(77,163,255,0.13);
+  border-color:rgba(77,163,255,0.24);
+  box-shadow:0 2px 10px rgba(77,163,255,0.08);
+}
+.row.active .icon-wrap .material-icons{
+  color:var(--accent);
+}
+.row.active .title{
+  color:var(--accent);
+}
+.row-group .row.active{
+  background:linear-gradient(90deg,rgba(77,163,255,0.11),rgba(77,163,255,0.045));
+  box-shadow:none;
+}
+.switch input:checked + .slider{
+  background:linear-gradient(135deg,#2588ed,var(--accent));
+  box-shadow:0 0 0 3px rgba(77,163,255,0.10),0 2px 10px rgba(77,163,255,0.22);
+}
+.switch input:checked + .slider .knob{
+  box-shadow:0 2px 5px rgba(0,0,0,0.28),0 0 0 1px rgba(255,255,255,0.18);
+}
+.row-group .row,
+.row-group .row .icon-wrap,
+.row-group .row .title{
+  transition:background .22s ease,border-color .22s ease,color .22s ease,box-shadow .22s ease;
+}
+.row-group .row:hover{
+  background:rgba(255,255,255,0.035);
+}
+.row-group .row.active:hover{
+  background:linear-gradient(90deg,rgba(77,163,255,0.14),rgba(77,163,255,0.055));
+}
+
+.row.active .title,
+.row-group .row.active .title{
+  color:#fff;
+}
+.row.active .icon-wrap .material-icons,
+.row-group .row.active .icon-wrap .material-icons{
+  color:#fff;
+}
+#zygiskIcon {
+  color: #fff !important;
+}
+
 </style>
 </head>
 <body>
@@ -437,47 +561,129 @@ h1 .material-icons{
    <span id="warningText"></span>
  </div>
 
- <div class="section-label behaviour">Customize Integrity Behaviour</div>
+
+
+  <div class="section-label">Use specific pixel prop</div>
+  <div id="lock-pixel-card" class="row-group behaviour-group">
+   <div class="row" id="row-custom-pif" onclick="toggleBehaviour('custom-pif')">
+     <div class="icon-wrap"><span class="material-icons">lock</span></div>
+     <div class="content">
+       <div class="title">Lock Pixel 6A</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input type="checkbox" id="custom-pif">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+  </div>
+
+ <div class="section-label">PIF Controls</div>
+ <div id="rows" class="row-group pif-group">
+<div class="row" id="row-spoofPixel" onclick="toggle('spoofPixel')">
+     <div class="icon-wrap"><span class="material-icons">shop</span></div>
+     <div class="content">
+       <div class="title">Pixelify Playstore</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofPixel" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofVendingFinger" onclick="toggle('spoofVendingFinger')">
+     <div class="icon-wrap"><span class="material-icons">android</span></div>
+     <div class="content">
+       <div class="title">Pixel Fingerprint</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofVendingFinger" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofBuild" onclick="toggle('spoofBuild')">
+     <div class="icon-wrap"><span class="material-icons">phone_iphone</span></div>
+     <div class="content">
+       <div class="title">Build Spoof</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofBuild" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofProps" onclick="toggle('spoofProps')">
+     <div class="icon-wrap"><span class="material-icons">android</span></div>
+     <div class="content">
+       <div class="title">GMS Spoof</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofProps" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofPatch" onclick="toggle('spoofPatch')">
+     <div class="icon-wrap"><span class="material-icons">update</span></div>
+     <div class="content">
+       <div class="title">Security Patch</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofPatch" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofSignature" onclick="toggle('spoofSignature')">
+     <div class="icon-wrap"><span class="material-icons">verified_user</span></div>
+     <div class="content">
+       <div class="title">ROM Signature</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofSignature" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofProvider" onclick="toggle('spoofProvider')">
+     <div class="icon-wrap"><span class="material-icons">dynamic_form</span></div>
+     <div class="content">
+       <div class="title">Attestation API</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofProvider" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+<div class="row" id="row-spoofVendingSdk" onclick="toggle('spoofVendingSdk')">
+     <div class="icon-wrap"><span class="material-icons">code</span></div>
+     <div class="content">
+       <div class="title">Downgrade SDK</div>
+     </div>
+     <label class="switch" onclick="event.stopPropagation()">
+       <input id="spoofVendingSdk" type="checkbox">
+       <span class="slider"><span class="knob"></span></span>
+     </label>
+   </div>
+ </div>
+
+<div class="action-btn" onclick="restartServices()">
+   <span class="material-icons">refresh</span>
+   <span>Restart GMS Services</span>
+ </div>
+
+  <div class="section-label behaviour">Customize Integrity Behaviour</div>
  <div id="behaviour-rows" class="row-group behaviour-group">
    <div class="row" id="row-advanced" onclick="toggleBehaviour('advanced')">
      <div class="icon-wrap"><span class="material-icons">tune</span></div>
      <div class="content">
        <div class="title">Advanced Mode</div>
      </div>
-     <div class="status-dot"></div>
      <label class="switch" onclick="event.stopPropagation()">
        <input type="checkbox" id="advanced">
        <span class="slider"><span class="knob"></span></span>
      </label>
    </div>
-   <div class="row" id="row-strong" onclick="toggleBehaviour('strong')">
-     <div class="icon-wrap"><span class="material-icons">check_circle</span></div>
-     <div class="content">
-       <div class="title">Strong Mode</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input type="checkbox" id="strong">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-verbose" onclick="toggleBehaviour('verbose')">
-     <div class="icon-wrap"><span class="material-icons">build_circle</span></div>
-     <div class="content">
-       <div class="title">Verbose Mode</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input type="checkbox" id="verbose">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
+
    <div class="row" id="row-skip_json" onclick="toggleBehaviour('skip_json')">
      <div class="icon-wrap"><span class="material-icons">code_off</span></div>
      <div class="content">
        <div class="title">Skip JSON</div>
      </div>
-     <div class="status-dot"></div>
      <label class="switch" onclick="event.stopPropagation()">
        <input type="checkbox" id="skip_json">
        <span class="slider"><span class="knob"></span></span>
@@ -488,7 +694,6 @@ h1 .material-icons{
      <div class="content">
        <div class="title">Skip Key</div>
      </div>
-     <div class="status-dot"></div>
      <label class="switch" onclick="event.stopPropagation()">
        <input type="checkbox" id="skip_key">
        <span class="slider"><span class="knob"></span></span>
@@ -496,90 +701,14 @@ h1 .material-icons{
    </div>
  </div>
 
- <div class="section-label">PIF Controls</div>
- <div id="rows" class="row-group pif-group">
-   <div class="row" id="row-spoofPixel" onclick="toggle('spoofPixel')">
-     <div class="icon-wrap"><span class="material-icons">shop</span></div>
-     <div class="content">
-       <div class="title">Pixelify Playstore</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofPixel" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofVendingFinger" onclick="toggle('spoofVendingFinger')">
-     <div class="icon-wrap"><span class="material-icons">android</span></div>
-     <div class="content">
-       <div class="title">Pixel Fingerprint</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofVendingFinger" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofBuild" onclick="toggle('spoofBuild')">
-     <div class="icon-wrap"><span class="material-icons">phone_iphone</span></div>
-     <div class="content">
-       <div class="title">Build Spoof</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofBuild" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofProps" onclick="toggle('spoofProps')">
-     <div class="icon-wrap"><span class="material-icons">android</span></div>
-     <div class="content">
-       <div class="title">GMS Spoof</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofProps" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofProvider" onclick="toggle('spoofProvider')">
-     <div class="icon-wrap"><span class="material-icons">dynamic_form</span></div>
-     <div class="content">
-       <div class="title">Attestation API</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofProvider" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofSignature" onclick="toggle('spoofSignature')">
-     <div class="icon-wrap"><span class="material-icons">verified_user</span></div>
-     <div class="content">
-       <div class="title">ROM Signature</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofSignature" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
-   <div class="row" id="row-spoofVendingSdk" onclick="toggle('spoofVendingSdk')">
-     <div class="icon-wrap"><span class="material-icons">engineering</span></div>
-     <div class="content">
-       <div class="title">A10 Downgrade SDK</div>
-     </div>
-     <div class="status-dot"></div>
-     <label class="switch" onclick="event.stopPropagation()">
-       <input id="spoofVendingSdk" type="checkbox">
-       <span class="slider"><span class="knob"></span></span>
-     </label>
-   </div>
+  <div class="section-label">Zygisk Injection</div>
+ <div class="zygisk-card" id="zygiskCard" onclick="toggleZygiskPause()">
+   <div class="icon-wrap" id="zygiskIconWrap"><span class="material-icons" id="zygiskIcon">play_arrow</span></div>
+   <div class="content">
+     <div class="title" id="zygiskTitle">Resume Zygisk</div>
+     <div class="subtitle-text" id="zygiskSub">Tap to pause zygisk injection   <div class="status-dot" id="zygiskDot"></div>
  </div>
-
- <div class="action-btn" onclick="restartServices()">
-   <span class="material-icons">refresh</span>
-   <span>Restart Services</span>
+   </div>
  </div>
 
  <div class="footer">&copy; IntegrityBox &bull; 2026</div>
@@ -596,14 +725,15 @@ const PROP_CANDIDATES = [
  "/data/adb/custom.pif.prop"
 ];
 
-const KEYS = ["spoofBuild","spoofProps","spoofProvider","spoofSignature","spoofVendingFinger","spoofVendingSdk","spoofPixel"];
+const KEYS = ["spoofBuild","spoofProps","spoofProvider","spoofSignature","spoofVendingFinger","spoofVendingSdk","spoofPatch","spoofPixel"];
 const ZYGISK_PATH = "/data/adb/modules/playintegrityfix/zygisk";
 const FLAG_DIR = "/data/adb/Box-Brain/PIF";
+const STOP_FLAG = "/data/adb/Box-Brain/PIF/stop";
+const ZYGISK_SCRIPT = "/data/adb/modules/playintegrityfix/webroot/common_scripts/zygisk.sh";
 
 const behaviourFlags = [
  {id:"advanced",icon:"tune",title:"Advanced Mode",label:"behaviour",desc:"Enabling this will preserve spoofing settings otherwise they'll be reset automatically when you run action. Please do not disable this toggle."},
- {id:"strong",icon:"security",title:"Strong Mode",label:"behaviour",desc:"Applies aggressive integrity checks and stronger property spoofing to bypass advanced detection methods."},
- {id:"verbose",icon:"article",title:"Verbose Mode",label:"behaviour",desc:"Enables detailed logging of all PIF operations for debugging and troubleshooting purposes. Only enable if you know what you're doing."},
+ {id:"custom-pif",icon:"lock",title:"Lock Pixel 6A",label:"behaviour",desc:"This option prevents random Pixel beta device selection and always uses Pixel 6a beta props when you click the Integrity Box action button. Enabling it is highly recommended for consistent results."},
  {id:"skip_json",icon:"code_off",title:"Skip JSON",label:"behaviour",desc:"Generates a valid meow.json file in your device's internal storage (/sdcard) whenever you trigger the Integrity Box action. The generated file can then be manually imported into your custom ROM's spoofing settings. Recommended for users running Integrity Box in ZYGISKLESS Mode. (ROM's inbuilt spoofing)."},
  {id:"skip_key",icon:"vpn_key_off",title:"Skip Key",label:"behaviour",desc:"Generates a valid keybox.xml file in your device's internal storage (/sdcard) whenever you trigger the Integrity Box action. The generated file can then be manually imported into your custom ROM's spoofing settings. Recommended for users running Integrity Box in ZYGISKLESS Mode. (ROM's inbuilt spoofing)."}
 ];
@@ -615,11 +745,13 @@ const pifRows = [
  {id:"spoofProps",icon:"android",title:"GMS Spoof",sub:"GMS properties"},
  {id:"spoofProvider",icon:"dynamic_form",title:"Attestation API",sub:"Breaks Google Wallet"},
  {id:"spoofSignature",icon:"verified_user",title:"ROM Signature",sub:"OEM-signed mask"},
- {id:"spoofVendingSdk",icon:"key_off",title:"A10 Downgrade SDK",sub:"Use if keybox is banned"}
+ {id:"spoofPatch",icon:"system_update",title:"Security Patch",sub:"Spoofs Android release and SECURITY_PATCH from the selected build profile"},
+ {id:"spoofVendingSdk",icon:"key_off",title:"A12 Downgrade SDK",sub:"Use if keybox is banned"}
 ];
 
 let propFile = null;
 let zygiskExists = false;
+let zygiskPaused = false;
 
 function showToast(msg){
  document.getElementById('toastText').textContent = msg;
@@ -652,9 +784,71 @@ function updateVisuals(key, isActive){
  document.getElementById(key).checked = isActive;
 }
 
+function updateZygiskCard(){
+ const card = document.getElementById('zygiskCard');
+ const icon = document.getElementById('zygiskIcon');
+ const title = document.getElementById('zygiskTitle');
+ const sub = document.getElementById('zygiskSub');
+ const dot = document.getElementById('zygiskDot');
+ const iconWrap = document.getElementById('zygiskIconWrap');
+
+ if(zygiskPaused){
+   card.classList.add('paused');
+   icon.textContent = 'pause';
+   title.textContent = 'Resume Zygisk';
+   sub.textContent = 'Zygisk injection is paused. Tap to resume.';
+   dot.style.background = 'var(--danger)';
+   dot.style.boxShadow = '0 0 12px var(--danger)';
+   iconWrap.style.background = 'var(--danger)';
+   iconWrap.style.boxShadow = '0 4px 16px rgba(255,77,77,0.3)';
+ }else{
+   card.classList.remove('paused');
+   icon.textContent = 'gavel';
+   title.textContent = 'Pause Zygisk';
+   sub.textContent = 'Tap to pause zygisk injection';
+   dot.style.background = 'var(--success)';
+   dot.style.boxShadow = '0 0 12px var(--success)';
+   iconWrap.style.background = 'var(--accent)';
+   iconWrap.style.boxShadow = '0 4px 16px var(--accent-glow)';
+ }
+}
+
+async function toggleZygiskPause(){
+ const card = document.getElementById('zygiskCard');
+ if(card.classList.contains('spinning')) return;
+
+ card.classList.add('spinning');
+ try{
+   if(zygiskPaused){
+     await sh(`sh -c 'rm -f "${STOP_FLAG}"'`);
+     zygiskPaused = false;
+     showToast('Zygisk resumed');
+   }else{
+     await sh(`sh -c 'mkdir -p "${FLAG_DIR}" && touch "${STOP_FLAG}"'`);
+     zygiskPaused = true;
+     showToast('Zygisk paused');
+   }
+   updateZygiskCard();
+   lockPifControls(zygiskPaused);
+   await sh(`sh -c 'sh "${ZYGISK_SCRIPT}"'`);
+ }catch(e){
+   showToast('Error: ' + (e.message || ''));
+   zygiskPaused = !zygiskPaused;
+   updateZygiskCard();
+   lockPifControls(zygiskPaused);
+ }finally{
+   card.classList.remove('spinning');
+ }
+}
+
+function lockPifControls(locked){
+ KEYS.forEach(k => setDisabled(k, locked));
+}
+
 async function toggle(key){
- if(!propFile || !zygiskExists){
-   showWarning("zygiskless mode has been enabled");
+ if(!propFile || !zygiskExists || zygiskPaused){
+   if(zygiskPaused) showWarning("Zygisk injection is paused");
+   else if(!zygiskExists) showWarning("zygiskless mode has been enabled");
    return;
  }
  const input = document.getElementById(key);
@@ -670,7 +864,7 @@ async function toggle(key){
      await writeKey(propFile, k, '0');
      updateVisuals(k, false);
    }
-   showToast('A10 mode enabled, others disabled');
+   showToast('A12 mode enabled, others disabled');
  } else {
    await writeKey(propFile, key, newVal);
    showToast(newVal === '1' ? 'Enabled' : 'Disabled');
@@ -692,11 +886,9 @@ async function toggleBehaviour(id){
  row.classList.add('spinning');
  try{
    if(newVal){
-     await sh('mkdir -p "'+FLAG_DIR+'" && touch "'+FLAG_DIR+'/'+id+'"');
-     showToast(id + ' enabled');
+     await sh(`sh -c 'mkdir -p "${FLAG_DIR}" && touch "${FLAG_DIR}/${id}"'`);
    }else{
-     await sh('rm -f "'+FLAG_DIR+'/'+id+'"');
-     showToast(id + ' disabled');
+     await sh(`sh -c 'rm -f "${FLAG_DIR}/${id}"'`);
    }
  }catch(e){
    showToast('Error: ' + (e.message || ''));
@@ -739,6 +931,11 @@ async function checkZygisk(){
  return out.trim() === 'exists';
 }
 
+async function checkStopFlag(){
+ const out = await sh(`sh -c 'if [ -f "${STOP_FLAG}" ]; then echo paused; else echo running; fi'`);
+ return out.trim() === 'paused';
+}
+
 async function hasAdvancedSettings(file){
  if(!file) return false;
  const out = await sh(`sh -c 'grep -q "^spoofProvider=" "${file}" && echo 1 || echo 0'`);
@@ -760,37 +957,54 @@ async function writeKey(file, key, value){
 }
 
 async function restartGMS(){
- await sh(`sh -c 'am force-stop com.google.android.gms.unstable 2>/dev/null || true; am force-stop com.android.vending 2>/dev/null || true'`);
+  const packages = [
+    'com.google.android.gms.unstable',
+    'com.google.android.gms',
+    'com.android.vending'
+  ];
+
+  for (const pkg of packages) {
+    await sh(`am force-stop '${pkg}'`);
+  }
 }
 
 async function restartServices(){
- await restartGMS();
- showToast('Services restarted');
+  const button = document.querySelector('.action-btn');
+  if (button?.dataset.busy === '1') return;
+
+  if (button) {
+    button.dataset.busy = '1';
+    button.style.pointerEvents = 'none';
+    button.style.opacity = '0.65';
+  }
+
+  try {
+    await restartGMS();
+    showToast('Google services processes stopped');
+  } catch (e) {
+    showToast('Failed to stop Google services');
+  } finally {
+    if (button) {
+      delete button.dataset.busy;
+      button.style.pointerEvents = '';
+      button.style.opacity = '';
+    }
+  }
 }
 
 async function refreshBehaviourStates(){
- let cmd = '';
  for(const f of behaviourFlags){
-   cmd += `if [ -f "${FLAG_DIR}/${f.id}" ];then echo "behaviour:${f.id}:1";else echo "behaviour:${f.id}:0";fi;`;
+   try{
+     const out = await sh(`sh -c 'if [ -f "${FLAG_DIR}/${f.id}" ]; then echo 1; else echo 0; fi'`);
+     const val = out.trim() === '1';
+     const cb = document.getElementById(f.id);
+     const row = document.getElementById('row-' + f.id);
+     if(cb && row){
+       cb.checked = val;
+       row.classList.toggle('active', val);
+     }
+   }catch(e){}
  }
- try{
-   const result = await sh(cmd);
-   if(result){
-     result.trim().split('\n').forEach(line => {
-       const parts = line.trim().split(':');
-       if(parts.length !== 3) return;
-       const [type, id, val] = parts.map(s => s.trim());
-       if(type === 'behaviour'){
-         const cb = document.getElementById(id);
-         const row = document.getElementById('row-' + id);
-         if(cb && row){
-           cb.checked = val === '1';
-           row.classList.toggle('active', val === '1');
-         }
-       }
-     });
-   }
- }catch(e){}
 }
 
 function openInfoModal(){
@@ -805,7 +1019,7 @@ function openInfoModal(){
    behaviourFlags.forEach((item, i) => {
      const div = document.createElement("div");
      div.className = "info-item";
-     div.innerHTML = `<div class="info-item-title"><span class="material-icons">${item.icon}</span>${item.title}</div><div class="info-item-desc">${item.desc}</div><div class="info-item-flag">Flag: ${item.id}</div>`;
+     div.innerHTML = `<div class="info-item-title"><span class="material-icons">${item.icon}</span>${item.title}</div><div class="info-item-desc">${item.desc}</div><div class="info-item-flag"></div>`;
      content.appendChild(div);
      if(i < behaviourFlags.length - 1){
        const d = document.createElement("div");
@@ -823,7 +1037,7 @@ function openInfoModal(){
    pifRows.forEach((item, i) => {
      const div = document.createElement("div");
      div.className = "info-item";
-     div.innerHTML = `<div class="info-item-title"><span class="material-icons">${item.icon}</span>${item.title}</div><div class="info-item-desc">${item.sub}</div><div class="info-item-flag">Key: ${item.id}</div>`;
+     div.innerHTML = `<div class="info-item-title"><span class="material-icons">${item.icon}</span>${item.title}</div><div class="info-item-desc">${item.sub}</div><div class="info-item-flag"></div>`;
      content.appendChild(div);
      if(i < pifRows.length - 1){
        const d = document.createElement("div");
@@ -846,18 +1060,28 @@ function closeInfoModal(e){
 async function init(){
  propFile = await findPropFile();
  zygiskExists = await checkZygisk();
+ zygiskPaused = await checkStopFlag();
+
+ updateZygiskCard();
+
+ if(zygiskPaused){
+   showWarning("Zygisk injection is paused");
+   KEYS.forEach(k => setDisabled(k, true));
+   await refreshBehaviourStates();
+   return;
+ }
 
  if(!zygiskExists){
    showWarning("zygiskless mode has been enabled");
    KEYS.forEach(k => setDisabled(k, true));
-   refreshBehaviourStates();
+   await refreshBehaviourStates();
    return;
  }
 
  if(!propFile){
    showWarning("Change IntegrityBox profile first");
    KEYS.forEach(k => setDisabled(k, true));
-   refreshBehaviourStates();
+   await refreshBehaviourStates();
    return;
  }
 
@@ -865,7 +1089,7 @@ async function init(){
  if(!adv){
    showWarning("Change your current profile brother");
    KEYS.forEach(k => setDisabled(k, true));
-   refreshBehaviourStates();
+   await refreshBehaviourStates();
    return;
  }
 
@@ -881,7 +1105,7 @@ async function init(){
    input.addEventListener('change', () => toggle(key));
  });
 
- refreshBehaviourStates();
+ await refreshBehaviourStates();
 }
 
 document.addEventListener('DOMContentLoaded', () => {
