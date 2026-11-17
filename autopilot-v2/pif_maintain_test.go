@@ -1287,7 +1287,7 @@ func TestListingDownWithAReadableFallbackFileIsAFailureAndNotKnown(t *testing.T)
 	}
 }
 
-// A date the user set on purpose in the Patch page of the WebUI (marker Box-Brain/Custom-Patch/<date>) is
+// A date the user pinned on purpose (marker Box-Brain/Custom-Patch/<date>) is
 // never "repaired" by the contour; the status says override and nothing wakes the daemon about it.
 func TestUserChosenCustomPatchIsAnOverrideNotAMismatch(t *testing.T) {
 	m := newMaintain(t, novemberMeow, "all=2026-09-01\n")
@@ -1574,5 +1574,24 @@ func TestPifRestoreOfAnAbsentFileRemovesTheCandidate(t *testing.T) {
 	}
 	if m.patchText() != "all=2026-09-01\n" {
 		t.Fatalf("the previous patch file must come back, got %q", m.patchText())
+	}
+}
+
+// A failed FIRST install (no fingerprint file yet) must leave neither the candidate nor a patch file that was moved
+// to it: the user's previous security_patch.txt comes back.
+func TestFailedFirstInstallLeavesThePreviousPatchFile(t *testing.T) {
+	m := newMaintain(t, novemberMeow, "all=2026-09-01\n")
+	if err := os.Remove(m.prop); err != nil {
+		t.Fatal(err)
+	}
+	m.e.pifWriter = func(path string, data []byte, mode os.FileMode) error {
+		return os.WriteFile(path, data[:len(data)/2], mode)
+	}
+	m.maintain(true)
+	if _, err := os.Stat(m.prop); !os.IsNotExist(err) {
+		t.Fatalf("the half-written candidate must be gone (stat err=%v)", err)
+	}
+	if m.patchText() != "all=2026-09-01\n" {
+		t.Fatalf("the previous patch file must be back, got %q (status %+v)", m.patchText(), m.e.status.PIF)
 	}
 }

@@ -1024,8 +1024,14 @@ func TestCorruptRevisionBlocksInstallsButNotStop(t *testing.T) {
 	}
 }
 
-func TestAnUnsetClockIsRetriedSoon(t *testing.T) {
-	if failureRetry("time_unknown") != 5*time.Minute || failureRetry("waiting") != 2*time.Hour || failureRetry("") != 2*time.Hour {
-		t.Fatal("time_unknown retries in 5 minutes, any other failure in 2 hours")
+func TestAnUnsetClockIsRetriedSoonThenLessOften(t *testing.T) {
+	want := []time.Duration{5 * time.Minute, 10 * time.Minute, 20 * time.Minute, 40 * time.Minute, 80 * time.Minute, 2 * time.Hour, 2 * time.Hour}
+	for i, w := range want {
+		if got := failureRetry("time_unknown", i+1); got != w {
+			t.Errorf("clock failure %d: %v, want %v", i+1, got, w)
+		}
+	}
+	if failureRetry("waiting", 3) != 2*time.Hour || failureRetry("", 0) != 2*time.Hour {
+		t.Fatal("any other failure waits two hours")
 	}
 }

@@ -336,11 +336,19 @@ func bootSeconds() float64 {
 
 // failureRetry: how long to wait after a failed cycle. An unset clock (typically right after boot) is fixed within
 // minutes, so that case is retried soon; everything else waits two hours.
-func failureRetry(phase string) time.Duration {
-	if phase == "time_unknown" {
-		return 5 * time.Minute
+// An offline phone must not run a full cycle every few minutes forever, so the wait doubles: 5, 10, 20, ... up to 2 hours.
+func failureRetry(phase string, clockFailures int) time.Duration {
+	if phase != "time_unknown" {
+		return 2 * time.Hour
 	}
-	return 2 * time.Hour
+	d := 5 * time.Minute
+	for i := 1; i < clockFailures && d < 2*time.Hour; i++ {
+		d *= 2
+	}
+	if d > 2*time.Hour {
+		d = 2 * time.Hour
+	}
+	return d
 }
 
 func (e *Engine) daemon(ctx context.Context) error {
@@ -396,6 +404,7 @@ func (e *Engine) daemon(ctx context.Context) error {
 	e.status.PID = os.Getpid()
 	defer func() { e.status.Ready = false; e.status.Running = false; e.status.Phase = "stopped"; e.publish() }()
 	failures := 0
+	clockFailures := 0
 	next := time.Now().Add(2 * time.Minute)
 	nextBoot := e.uptime() + 120
 	var screenSince time.Time
@@ -458,7 +467,12 @@ func (e *Engine) daemon(ctx context.Context) error {
 		if err != nil {
 			e.status.Reason = err.Error()
 
-			next = time.Now().Add(failureRetry(e.status.Phase))
+			if e.status.Phase == "time_unknown" {
+				clockFailures++
+			} else {
+				clockFailures = 0
+			}
+			next = time.Now().Add(failureRetry(e.status.Phase, clockFailures))
 			if e.automaticFetchDue > e.uptime() {
 				next = time.Now().Add(time.Duration((e.automaticFetchDue - e.uptime()) * float64(time.Second)))
 			}

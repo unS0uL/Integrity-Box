@@ -103,7 +103,11 @@ func main() {
 
 	}
 	e.status = Status{Integrity: "not_measured", Revocation: "unknown", Phase: "starting", TimeState: "unknown"}
-	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT) // not SIGHUP: handling it would undo the SIG_IGN that nohup gives the supervisor
+	signals := []os.Signal{syscall.SIGTERM, syscall.SIGINT, syscall.SIGHUP}
+	if os.Args[1] == "supervise" || os.Args[1] == "daemon" {
+		signals = signals[:2] // handling SIGHUP would undo the SIG_IGN that nohup gives the long-running processes
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), signals...)
 	defer cancel()
 	var err error
 	switch os.Args[1] {
