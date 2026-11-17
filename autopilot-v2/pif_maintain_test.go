@@ -557,6 +557,19 @@ func TestEligibilityDoesNotTrustThePatchOrDatesOfRemoteContent(t *testing.T) {
 			t.Errorf("%s: eligible=%v reason=%q", name, ok, why)
 		}
 	}
+	// a candidate must be a user build with release keys; an installed file of that kind is still PARSED (the shell doctor agrees)
+	for name, text := range map[string]string{
+		"userdebug build": strings.NewReplacer(":user/release-keys", ":userdebug/release-keys", "TYPE=user", "TYPE=userdebug").Replace(novemberMeow),
+		"test-keys build": strings.NewReplacer(":user/release-keys", ":user/test-keys", "TAGS=release-keys", "TAGS=test-keys").Replace(novemberMeow),
+	} {
+		cand, err := parsePIF([]byte(text))
+		if err != nil {
+			t.Fatalf("%s: an installed file of this kind must still parse: %v", name, err)
+		}
+		if ok, why := e.pifEligible(cand, oct, "banned", now, pol); ok || why != "candidate_not_release_build" {
+			t.Errorf("%s: eligible=%v reason=%q", name, ok, why)
+		}
+	}
 	// the real maintainer file is fine
 	if ok, why := e.pifEligible(mustPIF(t, novemberMeow), oct, "banned", now, pol); !ok {
 		t.Fatalf("the real file must pass: %s", why)
@@ -777,7 +790,7 @@ func TestRestoreRealignsThePatchWithTheRestoredFile(t *testing.T) {
 	if err := os.WriteFile(m.patch, []byte("all=2026-11-05\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
-	m.e.pifRestore(m.prop, orig, false)
+	m.e.pifRestore(m.prop, orig, false, nil, true)
 	if m.propText() != octoberPIF || m.patchText() != "all=2026-10-05\n" {
 		t.Fatalf("restored pair: prop ok=%v patch=%q", m.propText() == octoberPIF, m.patchText())
 	}
@@ -1552,8 +1565,14 @@ func TestPifRestoreOfAnAbsentFileRemovesTheCandidate(t *testing.T) {
 	if _, err := os.Stat(prop); err != nil {
 		t.Fatalf("fixture has no fingerprint file: %v", err)
 	}
-	m.e.pifRestore(prop, nil, true)
+	if err := os.WriteFile(m.patch, []byte("all=2026-12-05\n"), 0644); err != nil { // what a half-finished install leaves
+		t.Fatal(err)
+	}
+	m.e.pifRestore(prop, nil, true, []byte("all=2026-09-01\n"), false)
 	if _, err := os.Stat(prop); !os.IsNotExist(err) {
 		t.Fatalf("the candidate must be removed, stat err=%v", err)
+	}
+	if m.patchText() != "all=2026-09-01\n" {
+		t.Fatalf("the previous patch file must come back, got %q", m.patchText())
 	}
 }

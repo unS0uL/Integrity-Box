@@ -176,6 +176,12 @@ func (e *Engine) pifEligible(cand, cur pifFile, curState string, now time.Time, 
 	case cur.Props["ID"] != "" && cand.Props["ID"] == cur.Props["ID"] && cand.Props["FINGERPRINT"] == cur.Props["FINGERPRINT"]:
 		return false, "same_build"
 	}
+	// A candidate must be a user build with release keys: anything else does not pass Play Integrity, and once installed it
+	// would be classed "custom" and never replaced. (Not part of parsePIF: a file already on the phone must still be judged
+	// by the same rules as the shell doctor, which only checks that the fields agree.)
+	if cand.Props["TYPE"] != "user" || cand.Props["TAGS"] != "release-keys" {
+		return false, "candidate_not_release_build"
+	}
 	// The patch is not taken on trust: it must not lie in the future beyond the next monthly patch
 	// and must sit near the build date (canary-YYYYMM carries the YYYY-MM-05 patch).
 	if pt, err := time.Parse("2006-01-02", cand.patch()); err != nil || pt.After(now.AddDate(0, 0, 62)) {

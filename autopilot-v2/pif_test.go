@@ -100,8 +100,6 @@ func TestParsePIFRejects(t *testing.T) {
 		"duplicate key":                      novemberMeow + "MODEL=Other\n",
 		"fingerprint shape":                  replace("FINGERPRINT=google/bluejay_beta/bluejay:CANARY/ZP11.261016.008/16754936:user/release-keys", "FINGERPRINT=google/bluejay"),
 		"lowercase key":                      novemberMeow + "model=x\n",
-		"userdebug build":                    strings.NewReplacer(":user/release-keys", ":userdebug/release-keys", "TYPE=user", "TYPE=userdebug").Replace(novemberMeow),
-		"test-keys build":                    strings.NewReplacer(":user/release-keys", ":user/test-keys", "TAGS=release-keys", "TAGS=test-keys").Replace(novemberMeow),
 	}
 	for name, text := range cases {
 		if _, err := parsePIF([]byte(text)); err == nil {
