@@ -21,11 +21,13 @@ def main():
              and not any(part.startswith('.') for part in n.split('/'))
              and n not in ('hash', 'README.md', 'changelog.md')}
     names.update(('webroot/common_scripts/bin/box-autopilot', 'webroot/common_scripts/bin/GO-LICENSE'))
+    names = {n for n in names if (repo / n).is_file()}   # submodule gitlinks (empty directories) are not part of the package
     # A shipped file must be exactly what is committed (the engine's provenance is checked against HEAD).
     dirty = subprocess.check_output(['git', '-C', str(repo), 'status', '--porcelain', '--'] + sorted(names)).decode().strip()
     if dirty:
         raise RuntimeError('refusing to package files that differ from HEAD:\n' + dirty)
-    verified = subprocess.run(['sh', str(repo / 'autopilot-v2/verify_binary.sh')], capture_output=True, text=True)
+    verified = subprocess.run(['sh', str(repo / 'autopilot-v2/verify_binary.sh')], capture_output=True, text=True,
+                              env={k: v for k, v in os.environ.items() if k != 'VERIFY_BINARY_ALLOW_INCONCLUSIVE'})
     if verified.returncode != 0:
         raise RuntimeError('the engine binary is not verified against the committed source '
                            '(exit %d; 3 = built with another Go toolchain):\n%s%s' % (verified.returncode, verified.stdout, verified.stderr))

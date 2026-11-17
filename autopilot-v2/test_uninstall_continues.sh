@@ -8,6 +8,7 @@ W=$(mktemp -d)
 trap 'rm -rf "$W"' EXIT INT TERM
 mkdir -p "$W/m/webroot/common_scripts"
 printf '#!/bin/sh\nexit 1\n' > "$W/m/webroot/common_scripts/autopilot.sh"
+grep -q '^set -x' "$HERE/../uninstall.sh" || { echo 'FAIL: marker line set -x not found: the test would run the whole uninstall body'; exit 1; }
 sed -n '1,/^set -x/p' "$HERE/../uninstall.sh" | sed 's#/data/adb/Box-Brain/autopilot#'"$W"'/flag#' > "$W/m/uninstall.sh"
 echo 1 > "$W/flag"
 echo 'echo REACHED_CLEANUP' >> "$W/m/uninstall.sh"

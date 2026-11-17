@@ -60,13 +60,14 @@ else
 fi
 
 echo "== the shipped binary (Law 16, binary policy)"
-vbout=$(mktemp); sh "$HERE/verify_binary.sh" >"$vbout" 2>&1; vb=$?
+vbout=$(mktemp); env -u VERIFY_BINARY_ALLOW_INCONCLUSIVE sh "$HERE/verify_binary.sh" >"$vbout" 2>&1; vb=$?
 case $vb in
     0) printf 'PASS  %s\n' "tracked box-autopilot is a reproducible build of the committed source" ;;
     3) printf 'FAIL  %s\n' "tracked box-autopilot is NOT verified on this machine (different Go toolchain): run it where the recorded toolchain is installed"; tail -n 2 "$vbout" | sed 's/^/        /'; FAILS=$((FAILS + 1)) ;;
     *) printf 'FAIL  %s\n' "tracked box-autopilot is a reproducible build of the committed source"; tail -n 8 "$vbout" | sed 's/^/        /'; FAILS=$((FAILS + 1)) ;;
 esac
 rm -f "$vbout"
+step "package.py builds a package that verify.sh accepts (META-INF outside the manifest, no dot-files)" python3 "$HERE/package.py" --output "$(mktemp -d)/package.zip"
 
 echo "== shell"
 for sh_ in sh dash bash; do
@@ -79,7 +80,7 @@ for sh_ in sh dash bash; do
     step "test_uninstall_continues.sh under $sh_" "$sh_" "$HERE/test_uninstall_continues.sh"
 done
 if command -v shellcheck >/dev/null 2>&1; then
-    step "shellcheck" shellcheck -s sh webroot/common_scripts/doctor.sh webroot/common_scripts/autopilot.sh pif_policy.sh autopilot-v2/deploy_files.sh autopilot-v2/device_test.sh autopilot-v2/definition_of_done.sh autopilot-v2/build.sh autopilot-v2/verify_binary.sh
+    step "shellcheck" shellcheck -s sh webroot/common_scripts/doctor.sh webroot/common_scripts/autopilot.sh pif_policy.sh autopilot-v2/deploy_files.sh autopilot-v2/device_test.sh autopilot-v2/definition_of_done.sh autopilot-v2/build.sh autopilot-v2/verify_binary.sh autopilot-v2/test_uninstall_continues.sh
 else
     note "shellcheck not installed"
 fi

@@ -400,14 +400,14 @@ run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; cont
 : > "$W/log.txt"
 run_doctor pif_old AP_TODAY=2026-11-16; contains "$OUT" "WARN pif-applied"; contains "$OUT" "no fingerprint spoof line"
 
-# 12f2. A patch the user chose in the Patch page: WARN (kept as chosen), not FAIL; without the marker it is the FAIL of 12b.
+# 12f2. A patch the user pinned (Custom-Patch marker): WARN (kept as chosen), not FAIL; without the marker it is the FAIL of 12b.
 make_pif pif_custom "$(pif_text 2026-11-05 2026-12-20)
 " "all=2026-09-01
 "
 mkdir -p "$W/pif_custom/brain/Custom-Patch"                       # an EMPTY directory records no choice
 run_doctor pif_custom AP_TODAY=2026-11-16
 contains "$OUT" "FAIL patch-pair"
-: > "$W/pif_custom/brain/Custom-Patch/2026-09-01"                  # the marker the Patch page leaves
+: > "$W/pif_custom/brain/Custom-Patch/2026-09-01"                  # the marker (created by hand since v48)
 run_doctor pif_custom AP_TODAY=2026-11-16
 contains "$OUT" "WARN patch-pair"; contains "$OUT" "kept as chosen"; lacks "$OUT" "FAIL patch-pair"
 rm -f "$W/pif_custom/brain/Custom-Patch/2026-09-01"

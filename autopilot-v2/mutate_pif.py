@@ -15,9 +15,12 @@ LIFE = {'unverified clock polls every 30 min', 'failed listing marks the denylis
 # behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
 M_RUNNER = {'user-chosen patch ignored by the boot script policy': 'policy', 'doctor fails a user-chosen patch': 'doctor'}
 EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted|Oversized|UnknownSource|RealCommandRunner|PolicyDefaults|ZeroPolicy|ColonFields|ImpossibleDate|EveryPIFEndpoint'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted|Oversized|UnknownSource|RealCommandRunner|PolicyDefaults|ZeroPolicy|ColonFields|ImpossibleDate|EveryPIFEndpoint|NativeCurl|FailedFirstInstall'
 
 M = [
+    ("curl may negotiate HTTP/2 again", 'transport.go', '"--include", "--http1.1",', '"--include",'),
+    ("non-release candidates accepted", 'pif_source.go', 'if cand.Props["TYPE"] != "user" || cand.Props["TAGS"] != "release-keys" {', 'if false {'),
+    ("first-install failure keeps the moved patch", 'pif_install.go', '_ = e.writeMeta(e.patchPath(), patchOrig, 0644)', '_ = patchOrig'),
     ("denylist replaced instead of merged", 'pif_source.go', '	merged := make(map[string]bool, len(e.pifBanned)+len(fresh))\n	for k := range e.pifBanned {\n		merged[k] = true\n	}', '	merged := make(map[string]bool, len(fresh))'),
     ("fail-closed gate removed", 'pif_install.go', 'if !e.pifBannedKnown {', 'if false {'),
     ("patch sanity removed (future)", 'pif_source.go', '|| pt.After(now.AddDate(0, 0, 62)) {', '|| false {'),
