@@ -67,7 +67,22 @@ case $vb in
     *) printf 'FAIL  %s\n' "tracked box-autopilot is a reproducible build of the committed source"; tail -n 8 "$vbout" | sed 's/^/        /'; FAILS=$((FAILS + 1)) ;;
 esac
 rm -f "$vbout"
-step "package.py builds a package that verify.sh accepts (META-INF outside the manifest, no dot-files)" python3 "$HERE/package.py" --output "$(mktemp -d)/package.zip"
+# A stand-in for the upstream release: only the file names that matter, to prove the completeness rule on any machine.
+pkgtmp=$(mktemp -d)
+python3 - "$pkgtmp/base.zip" <<'PYEOF'
+import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], 'w') as z:
+    for n in ('classes.dex', 'zygisk/arm64-v8a.so', 'resetprop-rs/resetprop-arm64-v8a'):
+        z.writestr(n, 'x')
+PYEOF
+step "package.py builds a package that verify.sh accepts (META-INF outside the manifest, no dot-files)" python3 "$HERE/package.py" --base "$pkgtmp/base.zip" --output "$pkgtmp/package.zip"
+step "the built package carries the upstream binaries (classes.dex, zygisk, resetprop)" sh -c "unzip -l '$pkgtmp/package.zip' | grep -q ' classes.dex\$' && unzip -l '$pkgtmp/package.zip' | grep -q 'zygisk/arm64-v8a.so'"
+step "package.py REFUSES to build without the upstream binaries" sh -c "! python3 '$HERE/package.py' --output '$pkgtmp/refused.zip' >/dev/null 2>&1 && [ ! -e '$pkgtmp/refused.zip' ]"
+if [ -n "${PACKAGE_BASE_ZIP:-}" ]; then
+    step "a package from the real release ($PACKAGE_BASE_ZIP) builds and is complete" python3 "$HERE/package.py" --base "$PACKAGE_BASE_ZIP" --output "$pkgtmp/real.zip"
+else
+    note "PACKAGE_BASE_ZIP not set: the real upstream release was not used to build a package (the stand-in proved the rule only)"
+fi
 
 echo "== shell"
 for sh_ in sh dash bash; do

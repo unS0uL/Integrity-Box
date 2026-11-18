@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import shutil
+import sys
 import tempfile
 import zipfile
 
@@ -16,6 +17,8 @@ def main():
     parser.add_argument('--base', type=Path, help='upstream release zip that carries the binary files git does not track '
                         '(classes.dex, zygisk/*.so, resetprop-rs/resetprop-*, webroot/TRANSLATIONS/*); without it the '
                         'package is INCOMPLETE and must not be installed')
+    parser.add_argument('--allow-incomplete', action='store_true',
+                        help='build without the upstream binaries (for host checks only, never for installing)')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z']).decode().split('\0')
@@ -43,10 +46,14 @@ def main():
                 if not info.is_dir() and n not in files and (n == 'classes.dex' or n.startswith(('zygisk/', 'resetprop-rs/resetprop-', 'webroot/TRANSLATIONS/'))):
                     files[n] = base.read(n)
                     attrs[n] = info.external_attr
-    else:
-        import sys
-        print('WARNING: no --base: the package has no classes.dex, zygisk/*.so, resetprop binaries and translations. '
-              'It is for checks only; installing it removes the fingerprint injection.', file=sys.stderr)
+    # Without these the fingerprint injection is gone and DEVICE integrity fails (it happened once).
+    required = ('classes.dex', 'zygisk/arm64-v8a.so', 'resetprop-rs/resetprop-arm64-v8a')
+    missing = [n for n in required if n not in files]
+    if missing and not args.allow_incomplete:
+        raise SystemExit('refusing to build an incomplete package, missing: %s\n'
+                         'pass --base RELEASE.zip (the upstream release), or --allow-incomplete for host checks only' % ', '.join(missing))
+    if missing:
+        print('WARNING: incomplete package (%s missing): for checks only, never install it' % ', '.join(missing), file=sys.stderr)
     # The manifest lists what the installer extracts. Magisk/KernelSU unpack with `unzip -x 'META-INF/*'`, so
     # META-INF must NOT be in it (verify.sh refuses a manifest entry whose file is missing) - but it must be in the zip.
     manifest = ''.join(n + '|' + hashlib.sha256(data).hexdigest() + '\n'
