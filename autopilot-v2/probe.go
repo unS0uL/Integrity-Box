@@ -105,13 +105,26 @@ func (androidLog) Lines(ctx context.Context) ([]string, error) {
 	if !exists("/system/bin/logcat") {
 		return nil, errors.New("logcat missing")
 	}
-	cmd := exec.CommandContext(ctx, "/system/bin/logcat", "-d", "-v", "threadtime", "-t", "2000")
+	cmd := exec.CommandContext(ctx, "/system/bin/logcat", "-d", "-v", "uid,threadtime", "-t", "2000")
 	out := &cappedBuffer{limit: 1 << 20}
 	cmd.Stdout = out
 	if err := cmd.Run(); err != nil {
 		return nil, err
 	}
-	return strings.Split(out.String(), "\n"), nil
+	return rootLines(strings.Split(out.String(), "\n")), nil
+}
+
+// rootLines keeps only what root wrote (format "MM-DD HH:MM:SS.mmm UID PID TID P TAG: msg"). Tricky
+// Store runs as root, while any app can write a line with any tag; an unprivileged forgery of a
+// rejection must not roll back a good keybox. Our own marker is written by this root process.
+func rootLines(lines []string) []string {
+	var keep []string
+	for _, l := range lines {
+		if f := strings.Fields(l); len(f) > 3 && (f[2] == "root" || f[2] == "0") {
+			keep = append(keep, l)
+		}
+	}
+	return keep
 }
 
 type probeResult struct{ State, Evidence string }
