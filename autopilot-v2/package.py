@@ -13,6 +13,9 @@ import zipfile
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--base', type=Path, help='upstream release zip that carries the binary files git does not track '
+                        '(classes.dex, zygisk/*.so, resetprop-rs/resetprop-*, webroot/TRANSLATIONS/*); without it the '
+                        'package is INCOMPLETE and must not be installed')
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[1]
     names = subprocess.check_output(['git', '-C', str(repo), 'ls-files', '-z']).decode().split('\0')
@@ -32,6 +35,18 @@ def main():
         raise RuntimeError('the engine binary is not verified against the committed source '
                            '(exit %d; 3 = built with another Go toolchain):\n%s%s' % (verified.returncode, verified.stdout, verified.stderr))
     files = {n: (repo / n).read_bytes() for n in sorted(names) if (repo / n).is_file()}
+    attrs = {}
+    if args.base:
+        with zipfile.ZipFile(args.base) as base:
+            for info in base.infolist():
+                n = info.filename
+                if not info.is_dir() and n not in files and (n == 'classes.dex' or n.startswith(('zygisk/', 'resetprop-rs/resetprop-', 'webroot/TRANSLATIONS/'))):
+                    files[n] = base.read(n)
+                    attrs[n] = info.external_attr
+    else:
+        import sys
+        print('WARNING: no --base: the package has no classes.dex, zygisk/*.so, resetprop binaries and translations. '
+              'It is for checks only; installing it removes the fingerprint injection.', file=sys.stderr)
     # The manifest lists what the installer extracts. Magisk/KernelSU unpack with `unzip -x 'META-INF/*'`, so
     # META-INF must NOT be in it (verify.sh refuses a manifest entry whose file is missing) - but it must be in the zip.
     manifest = ''.join(n + '|' + hashlib.sha256(data).hexdigest() + '\n'
@@ -42,7 +57,7 @@ def main():
         for name, data in sorted(files.items()):
             info = zipfile.ZipInfo(name)
             executable = name.endswith('.sh') or name.endswith(('box-autopilot', 'update-binary'))
-            info.external_attr = (0o100755 if executable else 0o100644) << 16
+            info.external_attr = attrs.get(name, (0o100755 if executable else 0o100644) << 16)
             info.compress_type = zipfile.ZIP_DEFLATED
             archive.writestr(info, data, compresslevel=6)
     with zipfile.ZipFile(args.output) as archive:
