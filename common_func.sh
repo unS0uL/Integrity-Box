@@ -169,6 +169,7 @@ update_module_description() {
   MODPATH="/data/adb/modules/playintegrityfix"
   PROP="$MODPATH/module.prop"
   P="$MODPATH/custom.pif.prop"
+  BRAIN="/data/adb/Box-Brain"
 
   # Find BusyBox
   bb=""
@@ -182,24 +183,39 @@ update_module_description() {
   done
   [ -z "$bb" ] && return 0
 
-  # Read device identity
-  MODEL=""
-  DEVICE=""
-  ID=""
+  if [ ! -d "$MODPATH/zygisk" ]; then
+    DEVICE=$(getprop ro.product.device)
+    PATCH=$(getprop ro.build.version.security_patch)
 
-  if [ -f "$P" ]; then
-    MODEL=$("$bb" sed -n 's/^MODEL=//p' "$P" | "$bb" head -n1)
-    DEVICE=$("$bb" sed -n 's/^DEVICE=//p' "$P" | "$bb" head -n1)
-    ID=$("$bb" sed -n 's/^ID=//p' "$P" | "$bb" head -n1)
+    [ -z "$DEVICE" ] && DEVICE="Unknown"
+    [ -z "$PATCH" ] && PATCH="Unknown"
+
+    DESC="⏤͟͞𝗣𝗜𝗫𝗘𝗟 𝗠𝗢𝗗𝗘 🍋‍🟩 •• $DEVICE | $PATCH"
+  else
+    # Read spoofed identity
+    MODEL=""
+    INITSDK=""
+
+    if [ -f "$P" ]; then
+      MODEL=$("$bb" sed -n 's/^MODEL=//p' "$P" | "$bb" head -n1)
+      INITSDK=$("$bb" sed -n 's/^DEVICE_INITIAL_SDK_INT=//p' "$P" | "$bb" head -n1)
+    fi
+
+    [ -z "$MODEL" ] && MODEL="Unknown"
+    [ -z "$INITSDK" ] && INITSDK="Unknown"
+
+    # Status indicators
+    STATUS=""
+
+    [ -f "$BRAIN/safemode" ] && STATUS="${STATUS}⏤͟͞𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 🚨 "
+
+    SELINUX=$("$bb" cat /sys/fs/selinux/enforce 2>/dev/null)
+    [ "$SELINUX" = "0" ] && STATUS="${STATUS}⏤͟͞𝗦𝗘𝗟𝗜𝗡𝗨𝗫 𝗣𝗘𝗥𝗠𝗜𝗦𝗦𝗜𝗩𝗘 ❌ "
+
+    [ -f "$BRAIN/force-reset" ] && STATUS="${STATUS}⏤͟͞𝗔𝗚𝗥𝗘𝗦𝗦𝗜𝗩𝗘 𝗠𝗢𝗗𝗘 🔥 "
+
+    DESC="${STATUS}•• $MODEL | InitSDK $INITSDK"
   fi
-
-  [ -z "$MODEL" ] && MODEL="Unknown"
-  [ -z "$DEVICE" ] && DEVICE="Unknown"
-  [ -z "$ID" ] && ID="Unknown"
-
-  # Build description
-  DESC="current spoofing indentify: $MODEL ($DEVICE) | ID: $ID"
-
 
   # Update description
   "$bb" sed -i '/^description=/d' "$PROP"
