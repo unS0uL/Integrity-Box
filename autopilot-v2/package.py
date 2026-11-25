@@ -93,7 +93,7 @@ def main():
             if failed.returncode == 0:
                 raise RuntimeError('Corrupted package passed verification')
     digest = hashlib.sha256(args.output.read_bytes()).hexdigest()
-    args.output.with_suffix('.zip.sha256').write_text(digest + '  ' + args.output.name + '\n')
+    args.output.with_name(args.output.name + '.sha256').write_text(digest + '  ' + args.output.name + '\n')
     print('Package and corruption rejection verified:', digest)
 
 

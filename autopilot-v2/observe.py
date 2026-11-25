@@ -33,6 +33,10 @@ def main():
     args = parser.parse_args()
     if not 0 < args.hours <= 48 or not 300 <= args.interval <= 3600:
         parser.error('hours must be 0..48 and interval 300..3600 seconds')
+    repo = Path(__file__).resolve().parents[1]
+    out = args.output.resolve()
+    if out == repo or repo in out.parents:
+        parser.error('the observation log carries device identity: write it OUTSIDE the repository')
     args.output.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.time() + args.hours * 3600
     first = True

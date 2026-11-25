@@ -1,8 +1,6 @@
 # AutoPilot v2
 
-> Complete, current description of the business logic, build and deployment: `docs/integrity-box/AUTOPILOT_GUIDE.md` (workspace root). This README keeps the engine reference.
-
-ARM64 Android engine with POSIX entry points. Build with `./build.sh` from this directory (Go 1.24+, validated with Go 1.27.2). No third-party Go dependencies. Binary uses Android's native curl for netd/bionic DNS; HTTPS verification remains enabled. Google attestation trust anchors are embedded from https://android.googleapis.com/attestation/root (retrieved 2026-11-07); public-key pinning permits equivalent reissued roots. Root changes require a reviewed rebuild.
+ARM64 Android engine with POSIX entry points. Build with `./build.sh` from this directory on a clean, committed tree (it runs the full test suite and writes the binary and its provenance into `../webroot/common_scripts/bin`) (Go 1.24+, validated with Go 1.27.2). No third-party Go dependencies. Binary uses Android's native curl for netd/bionic DNS; HTTPS verification remains enabled. Google attestation trust anchors are embedded from https://android.googleapis.com/attestation/root (retrieved 2026-11-07); public-key pinning permits equivalent reissued roots. Root changes require a reviewed rebuild.
 
 `webroot/common_scripts/autopilot.sh` commands:
 
@@ -26,7 +24,7 @@ The scheduler uses /proc/uptime for suspend-aware deadlines. No alarm wakes a su
 
 Installation: parse XML/DER, validate private/public pairing, chain signatures, supplied trusted root and dates. File write transaction is staged on each target filesystem, preserves existing ownership/mode/context, journals bounded original copies, renames and syncs directories, and verifies bytes. Copies of the previous content exist only inside the transaction journal and are removed when it completes: no backup of a key stays on the device. Recovery rolls unfinished transactions back and removes a stale `keybox.autopilot-backup.xml` left by older versions. Main and enabled TEE-SIM/OMK consumers are prepared together; multiple paths cannot have a globally atomic rename. The journal handles interruption, but cannot make external consumers observe a simultaneous multi-file change. Tricky Store documents immediate config reload; no unconditional keystore restart is used. Other consumer-specific reload behavior remains a runtime compatibility concern.
 
-Tests: host race detector, vet, POSIX ShellCheck, JavaScript parsing; the Go test binary also runs under Android root in a private RAM directory. Android-only tests exercise SELinux labels, actual same-filesystem commits and journal recovery using synthetic fixtures, never the working keybox. Device identity and rollback copies are documented outside the module in the project implementation record.
+Tests: host race detector, vet, POSIX ShellCheck, a WebUI behaviour test (`test_webui.cjs` runs the page's functions in a Node `vm`); the Go test binary also runs under Android root in a private RAM directory. Android-only tests exercise SELinux labels, actual same-filesystem commits and journal recovery using synthetic fixtures, never the working keybox.
 
 Known verification limits: unit tests/fault scenarios are not certification of every ROM, actual power loss, all optional consumers or 48-hour battery behavior. Service acceptance does not guarantee Play Integrity acceptance. Real verdicts require the checker application and an unlocked UI. Legacy action.sh retains its unrelated broader operations; AutoPilot never invokes that action.
 
@@ -44,6 +42,8 @@ agreement within5min. `/proc/uptime` precision is accounted for. Unsupported/sta
 responses block automatic/manual updates rather than assuming correctness. This
 is a platform-specific time-evidence adapter, not a guarantee for other ROMs.
 `clock-status` exposes its current result without changing the keybox.
+
+`fetch TIER` installs from one named official tier (for example `Megatron2`). `pif-refresh` runs one fingerprint-contour cycle on demand and waits for a running daemon cycle (exit 4: busy or interrupted).
 
 `configure FLAG on|off` controls autopilot/disable-default-source/omk-key/sim-key.
 It serializes mutations and increments a persistent revision on actual changes;
@@ -101,6 +101,14 @@ Read at the start of every cycle; a change also wakes the daemon. `key = value`,
 | `probe_interval_hours` | 6 | 1..48 |
 | `probe_settle_seconds` | 5 | 1..15 |
 | `extra_hosts` | none | up to 8 plain DNS names (HTTPS redirect hosts) |
+| `pif_mode` | `auto` | `auto` repairs the patch pair and replaces a bad fingerprint, `manual` only reports, `off` disables the fingerprint contour |
+| `pif_renew_before_hours` | `72` | 24..336: replace a fingerprint this long before it expires |
+| `pif_lifetime_days` | `42` | 14..90: how long a Canary fingerprint is considered usable after its release date |
+| `pif_probe_wait_seconds` | `15` | 5..30: how long to look for the spoof in the log after Play Services restarts |
+| `pif_follow_latest` | `off` | `on` also replaces a still valid fingerprint when a newer build exists |
+| `pif_sync_patch` | `on` | keep `security_patch.txt` equal to the fingerprint's `SECURITY_PATCH` |
+| `pif_probe` | `on` | restart Play Services and check the log after an install |
+| `pif_sources` | `archive,google` | fingerprint sources, in order |
 | `consumer.tricky_store.modules` | `tricky_store` | module ids |
 | `consumer.tricky_store.tag` | `TrickyStore` | log tag |
 | `consumer.tricky_store.rejection` | `Load Keybox failed`, `valid keybox.xml was not present` | repeatable regular expression, up to 8 |

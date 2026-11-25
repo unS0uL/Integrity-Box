@@ -10,12 +10,13 @@ HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cd "$HERE/.."
 PASS=0
 fail() { printf 'FAIL: %s\n' "$1" >&2; exit 1; }
-PARSER=sh; command -v dash >/dev/null 2>&1 && PARSER=dash
+PARSER=sh
+if command -v dash >/dev/null 2>&1; then PARSER=dash; fi
 
-FILES=$(find . -name '*.sh' -not -path './autopilot-v2/*' -not -path './.git/*' | sort)
+FILES=$(find . \( -name '*.sh' -o -name update-binary \) -not -path './autopilot-v2/*' -not -path './.git/*' | sort)
 for f in $FILES; do
     case "$f" in ./hello.sh) ;; *) "$PARSER" -n "$f" 2>/dev/null || fail "$f does not parse under $PARSER (bash-only syntax?)" ;; esac
-    if grep -nE '<\(|>\(|<<<' "$f" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -vE "<<<?[[:space:]]*['\"]?[A-Z_]+['\"]?" | grep -q .; then
+    if grep -nE '<\(|>\(|<<<' "$f" | grep -vE '^[0-9]+:[[:space:]]*#' | grep -q .; then
         fail "$f uses process substitution or a here-string (not supported by busybox ash)"
     fi
     PASS=$((PASS + 1))

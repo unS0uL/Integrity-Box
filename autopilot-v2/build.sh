@@ -1,5 +1,5 @@
 #!/bin/sh
-# Builds the shipped engine and writes its PROVENANCE (Law 16, binary policy).
+# Builds the shipped engine and writes its PROVENANCE.
 #
 #   sh autopilot-v2/build.sh            tests, vet, reproducible arm64 build, provenance file
 #   ALLOW_DIRTY=1 sh autopilot-v2/build.sh   development build: no provenance is written (never commit its output)

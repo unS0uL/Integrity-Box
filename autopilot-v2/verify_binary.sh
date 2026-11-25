@@ -1,5 +1,5 @@
 #!/bin/sh
-# verify_binary.sh: is the TRACKED engine binary a reproducible build of the COMMITTED source? (Law 16, binary policy)
+# verify_binary.sh: is the TRACKED engine binary a reproducible build of the COMMITTED source?
 #
 #   sh autopilot-v2/verify_binary.sh
 #

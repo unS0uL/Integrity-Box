@@ -1,5 +1,5 @@
 #!/bin/sh
-# device_test.sh: run the whole test suite ON the phone (Law 9/16: a host test is not proof).
+# device_test.sh: run the whole test suite ON the phone (a host test is not proof).
 #
 #   sh autopilot-v2/device_test.sh ADDR:PORT [--serial S] [--skip REGEX]
 #

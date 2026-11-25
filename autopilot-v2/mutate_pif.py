@@ -1,5 +1,5 @@
-"""Mutation harness for the PIF contour (run after changing pif*.go): every mutation is applied to an in-memory copy of the originals, tested, and
-ALWAYS undone in `finally`. Exit status reflects survivors. Usage: python3 mutate_pif.py <autopilot-v2 dir>; every mutation must be reported as killed"""
+"""Mutation harness for the PIF contour (run after changing pif*.go): every mutation is written into the tracked source files (they are edited IN PLACE, so run it on a clean
+tree), tested, and restored from an in-memory copy of the originals in `finally`; after a kill -9 run `git checkout autopilot-v2` to restore them. Exit status reflects survivors. Usage: python3 mutate_pif.py <autopilot-v2 dir>; every mutation must be reported as killed"""
 import os
 import subprocess
 import sys

@@ -1,17 +1,17 @@
 #!/bin/sh
-# definition_of_done.sh: "done" is a command, not a feeling (Law 16, Agent Error Ledger 4.3).
+# definition_of_done.sh: "done" is a command, not a feeling.
 #
 #   sh autopilot-v2/definition_of_done.sh [--device ADDR:PORT] [--mutate] [--quick]
 #
 # Runs everything that CAN be run mechanically and lists what cannot (independent review, live scenario).
-# --device  also runs the whole suite ON the phone (device_test.sh): a host test is not proof (Law 9)
+# --device  also runs the whole suite ON the phone (device_test.sh): a host test is not proof
 # --mutate  also runs the mutation harness (slow; needs a committed tree)
 # --quick   skips the month-long simulations of the Go suite and -race
 # Exit status 0 only when every mechanical check passed.
 set -u
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ROOT="$HERE/.."
-LINT=${ANDROID_LINT:-/Volumes/Sam970/Temp/mi8AI/tools/android-lint/android_lint.py}
+LINT=${ANDROID_LINT:-$ROOT/../tools/android-lint/android_lint.py} # workspace tool, optional
 DEVICE=""
 MUTATE=0
 QUICK=0
@@ -59,7 +59,7 @@ else
     step "go test -race (with the month-long simulations)" sh -c "cd '$HERE' && go test -count=1 -race ./..."
 fi
 
-echo "== the shipped binary (Law 16, binary policy)"
+echo "== the shipped binary"
 vbout=$(mktemp); env -u VERIFY_BINARY_ALLOW_INCONCLUSIVE sh "$HERE/verify_binary.sh" >"$vbout" 2>&1; vb=$?
 case $vb in
     0) printf 'PASS  %s\n' "tracked box-autopilot is a reproducible build of the committed source" ;;
@@ -106,8 +106,8 @@ if command -v node >/dev/null 2>&1 && [ -f "$HERE/test_webui.cjs" ]; then step "
 echo "== lint (the self-learning barrier)"
 if [ -f "$LINT" ]; then step "android_lint over the repository" python3 "$LINT" "$ROOT"; else note "android_lint.py not found at $LINT"; fi
 
-CHECKDOCS=${CHECK_DOCS:-/Volumes/Sam970/Temp/mi8AI/tools/android-lint/check_docs.py}
-DOCSDIR=${DOCS_DIR:-/Volumes/Sam970/Temp/mi8AI/docs/integrity-box}
+CHECKDOCS=${CHECK_DOCS:-$ROOT/../tools/android-lint/check_docs.py}
+DOCSDIR=${DOCS_DIR:-$ROOT/../docs/integrity-box}
 if [ -f "$CHECKDOCS" ] && [ -d "$DOCSDIR" ]; then
     step "documents promise nothing that does not exist (tests, files, policy keys, exit codes, stale counts)" \
         python3 "$CHECKDOCS" "$ROOT" "$DOCSDIR/AUTOPILOT_GUIDE.md" "$DOCSDIR/AUTOPILOT_V4_PIF_DESIGN.md" "$DOCSDIR/AUTOPILOT_V3_DESIGN.md" "$DOCSDIR/README.md" "$ROOT/../DEVELOPMENT_RULES.md"
@@ -120,7 +120,7 @@ if [ -n "$DEVICE" ]; then
     echo "== on the phone"
     step "device tests (Go suite + boot-script test under the phone's shell)" sh "$HERE/device_test.sh" "$DEVICE"
 else
-    note "no --device given: the suite was NOT run on the phone (a host test is not proof, Law 9)"
+    note "no --device given: the suite was NOT run on the phone (a host test is not proof)"
 fi
 if [ "$MUTATE" = 1 ]; then
     echo "== mutation harness (do the tests really fail when the code is broken?)"
@@ -130,9 +130,9 @@ else
 fi
 
 echo "== gates that cannot be automated"
-note "independent fresh-eyes review of any automation that writes files as root (Law 12/16): done? attach the findings"
+note "independent fresh-eyes review of any automation that writes files as root: done? attach the findings"
 note "live scenario on the phone with a measured verdict (checker via uiautomator dump), and doctor afterwards"
-note "claims about what else touches an artifact: tools/android-lint/who_writes.sh output attached (Law 17)"
+note "claims about what else touches an artifact: tools/android-lint/who_writes.sh output attached"
 echo
 if [ "$FAILS" = 0 ]; then echo "MECHANICAL CHECKS PASS"; else echo "$FAILS MECHANICAL CHECK(S) FAILED"; fi
 [ "$FAILS" = 0 ]

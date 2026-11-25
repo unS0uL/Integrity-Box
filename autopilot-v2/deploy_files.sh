@@ -1,5 +1,5 @@
 #!/bin/sh
-# deploy_files.sh: the ONLY sanctioned way to replace files on a phone (Law 16).
+# deploy_files.sh: the ONLY sanctioned way to replace files on a phone.
 #
 #   sh autopilot-v2/deploy_files.sh ADDR:PORT [--serial SERIAL] [--restart-autopilot] [--dry-run] SRC=DST[=MODE[=REF]] ...
 #
@@ -64,7 +64,8 @@ done
 [ "$DRY" = 0 ] || { echo "dry run: nothing pushed"; exit 0; }
 
 SCRIPT=$(mktemp)
-trap 'rm -f "$SCRIPT"' EXIT INT TERM
+# Whatever fails on the host side (syntax check, push), no pushed temp file stays on the phone's flash.
+trap 'rm -f "$SCRIPT"; adb -s "$ADDR" shell "rm -f /data/local/tmp/$TAG.*" >/dev/null 2>&1' EXIT INT TERM
 cat > "$SCRIPT" <<DEVEOF
 #!/system/bin/sh
 RESTART=$RESTART
@@ -80,7 +81,8 @@ cleanup() {
 EOF
     rm -f "/data/local/tmp/$TAG.sh"
 }
-fail() { echo "ABORT: \$*"; cleanup; exit 1; }
+# A failure after AutoPilot was stopped must not leave it stopped.
+fail() { echo "ABORT: \$*"; cleanup; [ "\${OFF:-0}" = 1 ] && sh \$CS/autopilot.sh enable; exit 1; }
 stage() {
     [ -s "\$1" ] || return 1
     cp "\$1" "\$2.rvnew" || return 1
@@ -104,6 +106,7 @@ EOF
 if [ "\$RESTART" = 1 ]; then
     echo "--- stopping AutoPilot"
     sh \$CS/autopilot.sh disable
+    OFF=1
     sleep 3
     if ps -A | grep -q '[b]ox-autopilot'; then fail "an engine process is still running; nothing was replaced"; fi
 fi
@@ -117,6 +120,7 @@ EOF
 if [ "\$RESTART" = 1 ]; then
     echo "--- starting AutoPilot"
     sh \$CS/autopilot.sh enable
+    OFF=0
     sleep 8
     sh \$CS/autopilot.sh status | tr -d ' \\n' | grep -oE '"(phase|running|desired_enabled)":[^,]*' | tr '\\n' ' '; echo
 fi

@@ -280,7 +280,7 @@ while IFS= read -r line; do
     esac
 done < "$W/good/leaf.priv"
 
-# 12. PIF fingerprint and patch pair (Law 15). A fixture is a copy of the healthy keybox dir.
+# 12. PIF fingerprint and patch pair. A fixture is a copy of the healthy keybox dir.
 NOV_FP='google/bluejay_beta/bluejay:CANARY/ZP11.261016.008/16754936:user/release-keys'
 pif_text() { # PATCH [EXPIRY|none] [ID] [EXTRA_LINE]
     printf 'MANUFACTURER=Google\nMODEL=Pixel 6a\nFINGERPRINT=google/bluejay_beta/bluejay:CANARY/%s/16754936:user/release-keys\nBRAND=google\nPRODUCT=bluejay_beta\nDEVICE=bluejay\nRELEASE=CANARY\nID=%s\nINCREMENTAL=16754936\nTYPE=user\nTAGS=release-keys\nSECURITY_PATCH=%s\nDEVICE_INITIAL_SDK_INT=32\n' "${3:-ZP11.261016.008}" "${3:-ZP11.261016.008}" "$1"
