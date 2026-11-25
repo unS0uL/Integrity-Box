@@ -17,7 +17,8 @@ say() {    # say <file> <message>
     record "$1" "$2"; echo "$2"
 }
 log() {    # log <message>
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" | tee -a "$LOG_FILE"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') - $1" >> "$LOG_FILE"
+    echo "$1"
     /system/bin/log -t PATCH_OVERRIDE "$1"
 }
 
@@ -185,20 +186,20 @@ update_module_description() {
   # Read device identity
   MODEL=""
   DEVICE=""
-  INIT_SDK=""
+  ID=""
 
   if [ -f "$P" ]; then
     MODEL=$("$bb" sed -n 's/^MODEL=//p' "$P" | "$bb" head -n1)
     DEVICE=$("$bb" sed -n 's/^DEVICE=//p' "$P" | "$bb" head -n1)
-    INIT_SDK=$("$bb" sed -n 's/^DEVICE_INITIAL_SDK_INT=//p' "$P" | "$bb" head -n1)
+    ID=$("$bb" sed -n 's/^ID=//p' "$P" | "$bb" head -n1)
   fi
 
   [ -z "$MODEL" ] && MODEL="Unknown"
   [ -z "$DEVICE" ] && DEVICE="Unknown"
-  [ -z "$INIT_SDK" ] && INIT_SDK="Unknown"
+  [ -z "$ID" ] && ID="Unknown"
 
   # Build description
-  DESC="current spoofing indentify: $MODEL ($DEVICE) | InitSDK: $INIT_SDK"
+  DESC="current spoofing indentify: $MODEL ($DEVICE) | ID: $ID"
 
   # Backup original properties
   [ ! -f "$BAK" ] && "$bb" cp "$PROP" "$BAK"
@@ -501,13 +502,29 @@ handle_security_patch() {
   local PATCH_LOG="$LOGDIR/patch.log"
   local PATCH_FLAG="$BOX/patch"
   local SKIP_FILE="$BOX/skip"
-  local PATCH_DATE="2026-11-05"
+  local PATCH_FILE="$BOX/patch.txt"
+  local PATCH_DATE
   local PROP_MAIN="ro.build.version.security_patch"
   local FILE_PATH="/data/adb/tricky_store/security_patch.txt"
   local BRAND_PROP
   local CURRENT_PROP
 
+  # Automatically generate current month security patch date
+  PATCH_DATE="$(date '+%Y-%m')-05"
+
   BRAND_PROP="$(getprop ro.product.system.brand)"
+
+  # Ensure Box-Brain directory exists
+  if ! mkdir -p "$BOX" 2>/dev/null; then
+    echo " ✖ Failed to create Box-Brain directory."
+    return 1
+  fi
+
+  # Write automatically generated date to patch.txt
+  if ! echo "$PATCH_DATE" > "$PATCH_FILE"; then
+    echo " ✖ Failed to write patch date to $PATCH_FILE"
+    return 1
+  fi
 
   if ! mkdir -p "${FILE_PATH%/*}" 2>/dev/null; then
     echo " ✖ Failed to create Tricky Store directory."
@@ -757,13 +774,6 @@ print_header() {
 "
 }
 
-log_step() {
-  local status="$1" task="$2" timestamp
-  timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-  printf -- " ✦ %-10s %s\n" "$status" "$task"
-  printf "[%s] %-10s %s\n" "$timestamp" "$status" "$task" >> "$LOG_FILE"
-}
-
 handle_delay() {
   [ -f "/data/adb/Box-Brain/wait" ] || return 0
 
@@ -887,11 +897,18 @@ Z() {
 }
 
 check_and_set_prop() {
+    local FORCE=0
+
+    if [ "$1" = "-f" ]; then
+        FORCE=1
+        shift
+    fi
+
     local PROP="$1"
     local VALUE="$2"
     local CURRENT
 
-    if [ -f /data/adb/Box-Brain/force-reset ]; then
+    if [ "$FORCE" -eq 1 ] || [ -f /data/adb/Box-Brain/force-reset ]; then
         if $RESETPROP "$PROP" "$VALUE" >/dev/null 2>&1; then
             record pixel.log "Forced $PROP > $VALUE"
             return 0
@@ -1024,14 +1041,67 @@ wait_for_boot() {
     say boot.log " "
 }
 
+# Fingerprint of the keybox TrickyStore builds its stored keys from.
+keybox_fingerprint() {
+    local KEYBOX="/data/adb/tricky_store/keybox.xml"
+
+    [ -s "$KEYBOX" ] || return 1
+    sha256sum "$KEYBOX" 2>/dev/null | awk '{print $1}'
+}
+
+# TrickyStore derives its stored keys from the keybox, so they only have to be
+# dropped when the keybox itself changed. Purging them on every run makes
+# Google forget the device: accounts get logged out and pairings (ChatGPT remote
+# control, Wallet cards, Wear style devices) have to be redone for nothing.
+# Keys are kept while the installed keybox hash did not move.
 reset_tricky_store() {
-    if [ -d "/data/adb/tricky_store/key_db" ]; then
-        rm -rf "/data/adb/tricky_store/key_db"
-        mkdir -p "/data/adb/tricky_store/key_db"
+    local BOX="/data/adb/Box-Brain"
+    local STATE="$BOX/keybox-keys-hash"
+    local FORCE="$BOX/force-key-reset"
+    local current previous purge
+
+    purge=1
+
+    current="$(keybox_fingerprint)"
+    previous=""
+    [ -f "$STATE" ] && previous="$(head -n 1 "$STATE" 2>/dev/null | tr -dc 'a-fA-F0-9')"
+
+    if [ -f "$FORCE" ]; then
+        rm -f "$FORCE"
+        log " ✦ Key reset forced by user,"
+        log "   dropping stored TrickyStore keys"
+    elif [ -z "$current" ]; then
+        log " ✦ No keybox installed,"
+        log "   keeping existing keybox"
+        purge=0
+    elif [ -z "$previous" ]; then
+        log " ✦ First run with this keybox,"
+        log "   keeping existing keybox"
+        purge=0
+    elif [ "$current" = "$previous" ]; then
+        log " ✦ Keybox unchanged"
+        log "   keeping existing keybox"
+        purge=0
+    else
+        log " ✦ New keybox detected,"
+        log "   dropping stored TrickyStore keys"
     fi
 
-    if [ -d "/data/adb/tricky_store/persistent_keys" ]; then
-        rm -rf "/data/adb/tricky_store/persistent_keys"
-        mkdir -p "/data/adb/tricky_store/persistent_keys"
+    if [ "$purge" = 1 ]; then
+        if [ -d "/data/adb/tricky_store/key_db" ]; then
+            rm -rf "/data/adb/tricky_store/key_db"
+            mkdir -p "/data/adb/tricky_store/key_db"
+        fi
+
+        if [ -d "/data/adb/tricky_store/persistent_keys" ]; then
+            rm -rf "/data/adb/tricky_store/persistent_keys"
+            mkdir -p "/data/adb/tricky_store/persistent_keys"
+        fi
+    fi
+
+    if [ -n "$current" ]; then
+        mkdir -p "$BOX" 2>/dev/null
+        printf '%s\n' "$current" > "$STATE" 2>/dev/null ||
+            log " ✦ Failed to record the keybox fingerprint"
     fi
 }
