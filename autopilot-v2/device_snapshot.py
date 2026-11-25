@@ -27,11 +27,11 @@ def main():
             capture_output=True, timeout=30, check=True)
         return result.stdout
 
-    identity = remote('id; getprop ro.serialno; getprop ro.product.device')
+    identity = remote('id; getprop ro.serialno')
     lines = identity.decode().splitlines()
     if (not lines or not lines[0].startswith('uid=0(')
-            or lines[1:] != ['bea9a722', 'dipper']):
-        raise RuntimeError('Expected rooted daily phone bea9a722/dipper; no keybox captured')
+            or lines[1:] != [args.serial]):
+        raise RuntimeError('Expected a rooted device with serial %s; no keybox captured' % args.serial)
     # Hash before and after the stream: a concurrent replacement invalidates capture.
     target = '/data/adb/tricky_store/keybox.xml'
     before = remote('sha256sum ' + target).decode().split()[0]

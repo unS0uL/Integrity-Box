@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// The real files of the 2026-11-16 incident (device bea9a722), kept as fixtures.
+// The real files of the 2026-11-16 incident (the daily phone), kept as fixtures.
 const octoberPIF = `MANUFACTURER=Google
 MODEL=Pixel 11
 FINGERPRINT=google/cubs_beta/cubs:CANARY/ZP11.260918.007/16484274:user/release-keys

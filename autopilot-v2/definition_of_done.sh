@@ -114,6 +114,7 @@ else
 fi
 
 if [ -n "$DEVICE" ]; then
+    [ -n "${DEVICE_SERIAL:-}" ] || { echo "--device needs DEVICE_SERIAL=<the phone's ro.serialno>: the tools refuse to touch a device they were not told to expect" >&2; exit 2; }
     echo "== on the phone"
     step "device tests (Go suite + boot-script test under the phone's shell)" sh "$HERE/device_test.sh" "$DEVICE"
 else

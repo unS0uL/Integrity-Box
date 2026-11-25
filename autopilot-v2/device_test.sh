@@ -9,7 +9,7 @@
 set -eu
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 ROOT="$HERE/.."
-SERIAL=${DEVICE_SERIAL:-bea9a722}
+SERIAL=${DEVICE_SERIAL:-}
 SKIP='Lifecycle|DaemonCycleRate'
 ADDR=${1:?usage: device_test.sh ADDR:PORT [--serial S] [--skip REGEX]}
 shift
@@ -20,6 +20,7 @@ while [ $# -gt 0 ]; do
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
+[ -n "$SERIAL" ] || { echo "ABORT: name the device you mean: --serial S or DEVICE_SERIAL=S (the serial is checked before anything is touched)" >&2; exit 2; }
 got=$(adb -s "$ADDR" shell getprop ro.serialno 2>/dev/null | tr -d '\r')
 [ "$got" = "$SERIAL" ] || { echo "ABORT: $ADDR is '$got', expected '$SERIAL'" >&2; exit 1; }
 

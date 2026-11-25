@@ -10,14 +10,14 @@ import time
 
 
 def sample(serial):
-    command = ('[ "$(getprop ro.serialno)" = bea9a722 ] || exit 90; '
+    command = ('[ "$(getprop ro.serialno)" = ' + shlex.quote(serial) + ' ] || exit 90; '
                'getprop ro.serialno; '
                'sh /data/adb/modules/playintegrityfix/webroot/common_scripts/autopilot.sh status; '
                'sha256sum /data/adb/tricky_store/keybox.xml')
     result = subprocess.run(['adb', '-s', serial, 'shell', 'su -c ' + shlex.quote(command)],
                             capture_output=True, text=True, timeout=20, check=True)
     lines = result.stdout.splitlines()
-    if len(lines) != 3 or lines[0] != 'bea9a722':
+    if len(lines) != 3 or lines[0] != serial:
         raise ValueError('identity or status response mismatch')
     return {'identity': lines[0], 'status': json.loads(lines[1]),
             'keybox_sha256': lines[2].split()[0]}

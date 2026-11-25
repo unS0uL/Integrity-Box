@@ -11,7 +11,7 @@
 # removes every temp file it created. Nothing is replaced unless EVERY file staged and verified.
 set -eu
 
-SERIAL=${DEVICE_SERIAL:-bea9a722}
+SERIAL=${DEVICE_SERIAL:-}
 RESTART=0
 DRY=0
 ADDR=${1:?usage: deploy_files.sh ADDR:PORT [--serial S] [--restart-autopilot] [--dry-run] SRC=DST[=MODE[=REF]] ...}
@@ -28,6 +28,7 @@ while [ $# -gt 0 ]; do
 done
 [ $# -gt 0 ] || { echo "no files given" >&2; exit 2; }
 
+[ -n "$SERIAL" ] || { echo "ABORT: name the device you mean: --serial S or DEVICE_SERIAL=S (the serial is checked before anything is touched)" >&2; exit 2; }
 got=$(adb -s "$ADDR" shell getprop ro.serialno 2>/dev/null | tr -d '\r')
 [ "$got" = "$SERIAL" ] || { echo "ABORT: $ADDR is serial '$got', expected '$SERIAL' (never deploy to a device you did not identify)" >&2; exit 1; }
 
