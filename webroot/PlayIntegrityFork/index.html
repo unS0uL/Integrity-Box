@@ -535,6 +535,36 @@ h1 .material-icons{
   color: #fff !important;
 }
 
+
+.sdk-selector{
+  display:none;
+  padding:12px 14px 14px;
+  margin:-6px 0 10px;
+  background:rgba(77,163,255,0.055);
+  border:1px solid rgba(77,163,255,0.16);
+  border-radius:14px;
+  position:relative;z-index:2;
+}
+.sdk-selector.show{display:block}
+.sdk-options{display:flex;flex-wrap:wrap;gap:7px}
+.sdk-option{
+  border:1px solid rgba(255,255,255,0.08);
+  background:rgba(255,255,255,0.045);
+  color:var(--text2);
+  border-radius:999px;
+  padding:8px 11px;
+  font-size:12px;font-weight:600;
+  cursor:pointer;transition:all .2s ease;
+}
+.sdk-option:hover{background:rgba(77,163,255,0.12);border-color:rgba(77,163,255,0.28);color:#fff}
+.sdk-option.selected{
+  background:rgba(77,163,255,0.18);
+  border-color:rgba(77,163,255,0.5);
+  color:#fff;box-shadow:0 0 12px rgba(77,163,255,0.12);
+}
+.sdk-selector.disabled{opacity:.4;pointer-events:none}
+.sdk-caption{font-size:11px;color:var(--text2);margin-bottom:9px}
+
 </style>
 </head>
 <body>
@@ -658,6 +688,20 @@ h1 .material-icons{
        <input id="spoofVendingSdk" type="checkbox">
        <span class="slider"><span class="knob"></span></span>
      </label>
+   </div>
+   <div id="sdkSelector" class="sdk-selector">
+     <div class="sdk-caption">Vending SDK version</div>
+     <div class="sdk-options" id="sdkOptions">
+       <button type="button" class="sdk-option" data-sdk="29">Android 10</button>
+       <button type="button" class="sdk-option" data-sdk="30">Android 11</button>
+       <button type="button" class="sdk-option" data-sdk="31">Android 12</button>
+       <button type="button" class="sdk-option" data-sdk="32">Android 12L</button>
+       <button type="button" class="sdk-option" data-sdk="33">Android 13</button>
+       <button type="button" class="sdk-option" data-sdk="34">Android 14</button>
+       <button type="button" class="sdk-option" data-sdk="35">Android 15</button>
+       <button type="button" class="sdk-option" data-sdk="36">Android 16</button>
+       <button type="button" class="sdk-option" data-sdk="37">Android 17</button>
+     </div>
    </div>
  </div>
 
@@ -843,6 +887,8 @@ async function toggleZygiskPause(){
 
 function lockPifControls(locked){
  KEYS.forEach(k => setDisabled(k, locked));
+ const selector = document.getElementById('sdkSelector');
+ if(selector) selector.classList.toggle('disabled', locked);
 }
 
 async function toggle(key){
@@ -858,20 +904,44 @@ async function toggle(key){
  input.checked = !input.checked;
 
  if(key === 'spoofVendingSdk' && newVal === '1'){
-   await writeKey(propFile, key, newVal);
+   await writeKey(propFile, key, '1');
    const others = KEYS.filter(k => k !== key && k !== 'spoofBuild' && k !== 'spoofProps');
    for(const k of others){
      await writeKey(propFile, k, '0');
      updateVisuals(k, false);
    }
-   showToast('A12 mode enabled, others disabled');
+   showSdkSelector(true, '37');
+   showToast('Downgrade SDK enabled · Android 17');
  } else {
    await writeKey(propFile, key, newVal);
+   if(key === 'spoofVendingSdk') showSdkSelector(newVal === '1', newVal === '1' ? '37' : '');
    showToast(newVal === '1' ? 'Enabled' : 'Disabled');
  }
 
  await restartGMS();
  updateVisuals(key, newVal === '1');
+}
+
+function showSdkSelector(enabled, selected){
+ const selector = document.getElementById('sdkSelector');
+ if(!selector) return;
+ selector.classList.toggle('show', !!enabled);
+ if(selected) setSdkSelection(selected);
+}
+function setSdkSelection(value){
+ const normalized = String(value === '1' ? '37' : value);
+ document.querySelectorAll('.sdk-option').forEach(btn => btn.classList.toggle('selected', btn.dataset.sdk === normalized));
+}
+async function selectSdkVersion(value){
+ if(!propFile || !zygiskExists || zygiskPaused) return;
+ const input = document.getElementById('spoofVendingSdk');
+ if(!input || input.disabled || !input.checked) return;
+ if(!/^(29|30|31|32|33|34|35|36|37)$/.test(String(value))) return;
+ await writeKey(propFile, 'spoofVendingSdk', String(value));
+ setSdkSelection(value);
+ await restartGMS();
+ const names = {'29':'10','30':'11','31':'12','32':'12L','33':'13','34':'14','35':'15','36':'16','37':'17'};
+ showToast('Vending SDK set to Android ' + names[String(value)]);
 }
 
 async function toggleBehaviour(id){
@@ -1097,12 +1167,21 @@ async function init(){
 
  for(const key of KEYS){
    const val = await readKey(propFile, key);
-   updateVisuals(key, val === '1');
+   if(key === 'spoofVendingSdk'){
+     const enabled = val !== '' && val !== '0';
+     updateVisuals(key, enabled);
+     showSdkSelector(enabled, val === '1' ? '37' : val);
+   }else{
+     updateVisuals(key, val === '1');
+   }
  }
 
  KEYS.forEach(key => {
    const input = document.getElementById(key);
    input.addEventListener('change', () => toggle(key));
+ });
+ document.querySelectorAll('.sdk-option').forEach(btn => {
+   btn.addEventListener('click', () => selectSdkVersion(btn.dataset.sdk));
  });
 
  await refreshBehaviourStates();

@@ -303,6 +303,12 @@ setup_blacklist() {
     fi
 }
 
+setup_status() {
+    if [ ! -f "$FLAG/status.json" ]; then
+        cp "$MODPATH/toolkit/status.json" "$FLAG/status.json"
+    fi
+}
+
 release_source() {
     nohup am start -a android.intent.action.VIEW -d "https://t.me/MeowRedirect" > /dev/null 2>&1 &
 }
@@ -315,6 +321,7 @@ enable_recommended_settings() {
     touch "$FLAG/keyswitch"
     touch "$FLAG/wait"
     touch "$FLAG/autopilot"
+    touch "$FLAG/force-reset"
     touch "$FLAG/PIF/skip_json"
     touch "$FLAG/PIF/skip_key"
     touch "$FLAG/PIF/advanced"
@@ -340,9 +347,10 @@ install_module() {
     handle_module_props
     check_boot_hash
     setup_environment
-    magisk_resetprop_rs "$MODPATH/resetprop-rs"
+#    magisk_resetprop_rs "$MODPATH/resetprop-rs"
     cleanup
     setup_blacklist
+    setup_status
 }
 
 # Verify the extracted package before executing its helpers or changing files.
@@ -733,8 +741,9 @@ setprop_safe() {
 
 # START LOG
 writelog "•••••• Starting Security Patch Override ••••••"
+writelog "Selected Patch Date: ${PATCH_DATE:-none} (Source: custom.pif.prop)"
 
-# Exit if module is disabled 
+# Exit if module is disabled
 if [ -f "/data/adb/modules/playintegrityfix/disable" ]; then
     writelog "Integrity Box is disabled, exiting..."
     exit 0
