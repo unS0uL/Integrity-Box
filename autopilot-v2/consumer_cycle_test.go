@@ -95,7 +95,7 @@ func TestRefusedInstallWithoutFallbackDemotesLocalKey(t *testing.T) {
 	log.lines = func(n string) []string { return []string{"I BoxAutoPilot: probe=" + n, rejectionLine} }
 	e, _ := auditEngine(t, log)
 	installed, _ := os.ReadFile(e.target())
-	got := e.verifyInstalled(context.Background(), installed, e.status.Local, Health{State: "expired"}, []byte("previous"), false)
+	got := e.verifyInstalled(context.Background(), installed, e.status.Local, Health{State: "expired"}, []byte("previous"))
 	if got != "keep_rejected" || e.status.Local.State != "consumer_rejected" || !e.isRejected(e.status.Local.Fingerprint) {
 		t.Fatal(got, e.status.Local.State)
 	}

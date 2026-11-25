@@ -311,7 +311,7 @@ func TestAuditReportsStateWithoutWriting(t *testing.T) {
 	if b, _ := os.ReadFile(patchPath); string(b) != "all=2026-10-05\n" {
 		t.Fatal("audit must not write")
 	}
-	if e.pifDeadline().After(time.Now().Add(31 * time.Minute)) {
+	if e.pifDeadline().After(e.now().Add(31 * time.Minute)) {
 		t.Fatal("a banned fingerprint must be re-examined soon")
 	}
 	// engine without a module root (legacy unit tests) never touches PIF
@@ -376,7 +376,7 @@ func TestReleaseDateFallsBackToBuildID(t *testing.T) {
 	if got := f.releaseDate().Format("2006-01-02"); got != "2026-10-20" {
 		t.Fatalf("explicit release must win, got %s", got)
 	}
-	g := mustPIF(t, strings.Replace(strings.Replace(novemberMeow, "ZP11.261016.008", "BUILD-X", 2), "ZP11.261016.008", "BUILD-X", 1))
+	g := mustPIF(t, strings.ReplaceAll(novemberMeow, "ZP11.261016.008", "BUILD-X"))
 	if !g.releaseDate().IsZero() || !g.expiry(time.Hour).IsZero() {
 		t.Fatal("an id without a date leaves the expiry unknown")
 	}

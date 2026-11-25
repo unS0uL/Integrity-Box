@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -27,7 +26,8 @@ func doctorLines(t *testing.T, pif, patch string) map[string]string {
 	}
 	cmd := exec.Command("sh", "../webroot/common_scripts/doctor.sh")
 	cmd.Env = append(os.Environ(), "AP_PIF="+pp, "AP_PATCH="+tp, "AP_TODAY=2026-11-16", "AP_KEYBOX="+filepath.Join(dir, "none", "keybox.xml"),
-		"AP_MODULES="+filepath.Join(dir, "nomodules"), "AP_LOGCAT="+filepath.Join(dir, "nologcat"), "AP_CONF="+filepath.Join(dir, "noconf"), "AP_NO_PROBE=1")
+		"AP_MODULES="+filepath.Join(dir, "nomodules"), "AP_LOGCAT="+filepath.Join(dir, "nologcat"), "AP_CONF="+filepath.Join(dir, "noconf"), "AP_NO_PROBE=1",
+		"AP_BRAIN="+filepath.Join(dir, "nobrain"), "AP_ENGINE="+filepath.Join(dir, "noengine")) // never read the phone's own Custom-Patch or run a real engine
 	out, _ := cmd.CombinedOutput() // the exit code reflects unrelated checks (no keybox here)
 	res := map[string]string{}
 	for _, l := range strings.Split(string(out), "\n") {
@@ -152,5 +152,4 @@ func TestDoctorAgreesWithTheEngineOnTheSecurityPatchFile(t *testing.T) {
 			t.Errorf("%s (%q): engine %s, doctor %s", name, text, want, got)
 		}
 	}
-	_ = fmt.Sprint
 }

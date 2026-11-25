@@ -252,7 +252,7 @@ func TestEligibilityTable(t *testing.T) {
 }
 
 func TestMaintainLeavesHealthyAndForeignStatesAlone(t *testing.T) {
-	healthy := strings.Replace(novemberMeow, "SECURITY_PATCH", "SECURITY_PATCH", 1)
+	healthy := novemberMeow
 	cases := []struct {
 		name  string
 		pif   string
@@ -366,7 +366,7 @@ func TestProbeIsHonestAboutWhatItSaw(t *testing.T) {
 		if s.Applied != c.wantState || s.Evidence != c.wantEv {
 			t.Errorf("%s: %s/%s, want %s/%s", c.name, s.Applied, s.Evidence, c.wantState, c.wantEv)
 		}
-		// whatever the probe saw, an install is never rolled back for lack of evidence (Law 6)
+		// whatever the probe saw, an install is never rolled back for lack of evidence
 		if s.ID != "ZP11.261016.008" || s.Action != "installed" {
 			t.Errorf("%s: install must stay: %+v", c.name, s)
 		}
@@ -790,7 +790,7 @@ func TestRestoreRealignsThePatchWithTheRestoredFile(t *testing.T) {
 	if err := os.WriteFile(m.patch, []byte("all=2026-11-05\n"), 0640); err != nil {
 		t.Fatal(err)
 	}
-	m.e.pifRestore(m.prop, orig, false, nil, true)
+	m.e.pifRestore(m.prop, orig, false, []byte("all=2026-10-05\n"), false) // the patch as it was before the install began
 	if m.propText() != octoberPIF || m.patchText() != "all=2026-10-05\n" {
 		t.Fatalf("restored pair: prop ok=%v patch=%q", m.propText() == octoberPIF, m.patchText())
 	}
@@ -1138,7 +1138,7 @@ func TestAMissingFingerprintFileIsRecreatedUnlessAJSONSourceFeedsTheModule(t *te
 
 func TestACandidateWithoutABuildDateIsNeverTrusted(t *testing.T) {
 	e := &Engine{brain: t.TempDir(), pifBanned: map[string]bool{}}
-	undated := mustPIF(t, strings.NewReplacer("ZP11.261016.008", "NIGHTLYBUILD", "SECURITY_PATCH=2026-11-05", "SECURITY_PATCH=2026-11-05").Replace(novemberMeow))
+	undated := mustPIF(t, strings.NewReplacer("ZP11.261016.008", "NIGHTLYBUILD").Replace(novemberMeow))
 	for _, state := range []string{"banned", "expired", "absent", "expiring"} {
 		if ok, why := e.pifEligible(undated, mustPIF(t, octoberPIF), state, time.Date(2026, 11, 16, 0, 0, 0, 0, time.UTC), defaultPIFPolicy()); ok || why != "candidate_undated" {
 			t.Errorf("%s: eligible=%v reason=%q", state, ok, why)
@@ -1234,7 +1234,7 @@ func TestUnverifiedClockDoesNotCauseThirtyMinuteWakeUps(t *testing.T) {
 	e.timeCheck = func(context.Context) error { return nil }
 	m.net.down = true
 	e.pifMaintain(context.Background(), false)
-	if d := e.pifDeadline().Sub(e.now()); d > 3*time.Hour && e.status.PIF.State != "expired" && e.status.PIF.State != "banned" {
+	if d := e.pifDeadline().Sub(e.now()); d > 3*time.Hour {
 		t.Fatalf("verified clock: %v in state %s", d, e.status.PIF.State)
 	}
 }

@@ -74,7 +74,7 @@ func TestRollbackIsNotBlockedByDisablingAutopilot(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.WriteFile(filepath.Join(e.moduleRoot, "disable"), nil, 0600)
-	result := e.verifyInstalled(context.Background(), next, nh, previous, old, true)
+	result := e.verifyInstalled(context.Background(), next, nh, previous, old)
 	got, _ := os.ReadFile(e.target())
 	if string(got) != string(old) {
 		t.Fatal("refused key left in place:", result)
@@ -155,7 +155,7 @@ func TestRefusalMemoryResetsWhenConsumerPolicyChanges(t *testing.T) {
 	}
 }
 
-// Law 2: backups exist only inside a real transaction and are removed when it completes.
+// Backups exist only inside a real transaction and are removed when it completes.
 // Nothing with a private key may stay on the device after an install.
 func TestInstallLeavesNoPersistentBackup(t *testing.T) {
 	stubSELinux(t)

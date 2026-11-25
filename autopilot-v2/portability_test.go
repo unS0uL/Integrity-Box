@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestTimeSourceIsClearedWhenTheCheckFails(t *testing.T) {
@@ -120,5 +119,4 @@ func TestImportRequiresTheConsumer(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "required keybox consumer") || string(got) != string(old) {
 		t.Fatalf("err=%v", err)
 	}
-	_ = time.Second
 }

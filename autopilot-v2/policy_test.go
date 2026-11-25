@@ -135,6 +135,7 @@ func TestPolicyBudgetAndPriorityShapeTheSearch(t *testing.T) {
 }
 
 func TestPolicyRenewWindowDecidesWhenToSearch(t *testing.T) {
+	t.Cleanup(func() { renewWindow = 24 * time.Hour }) // the window is a package global set by every cycle: never leak it into other tests
 	for _, c := range []struct {
 		conf   string
 		search bool
@@ -158,7 +159,6 @@ func TestPolicyRenewWindowDecidesWhenToSearch(t *testing.T) {
 			t.Fatalf("%q: searched=%v want %v", c.conf, searched, c.search)
 		}
 	}
-	renewWindow = 24 * time.Hour
 }
 
 func TestPolicyConsumerOverrideReachesTheProbe(t *testing.T) {
