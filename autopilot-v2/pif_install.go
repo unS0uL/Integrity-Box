@@ -189,6 +189,7 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	}
 	restoreAll := func() { e.pifRestore(prop, orig, absent, pb, pAbsent) }
 	if err = e.writeFile(prop, data, 0644); err != nil {
+		restoreAll() // the rename may have happened before a later step (directory sync) failed
 		return err
 	}
 	back, _, err := readOptional(prop, pifMaxBytes)
@@ -214,23 +215,25 @@ func (e *Engine) pifInstall(ctx context.Context, cand, cur pifFile) error {
 	return nil
 }
 
-// pifRestore puts the previous fingerprint file back AND realigns security_patch.txt with it: a
-// failure after the patch was already repaired must not leave the pair split.
+// pifRestore puts the previous fingerprint file and the previous security_patch.txt back from the
+// in-memory copies taken before the write, then lets the patch policy realign the pair if the
+// previous state was itself split. Restoring the patch bytes directly (instead of relying on the
+// resync alone) matters because the resync is skipped for an override pair and in dry runs.
 func (e *Engine) pifRestore(prop string, orig []byte, absent bool, patchOrig []byte, patchAbsent bool) {
-	if !absent {
-		_ = e.writeMeta(prop, orig, 0644)
-	} else {
+	if absent {
 		_ = os.Remove(prop) // there was no file before: do not leave the candidate behind as if it were the user's
-		// without a fingerprint file there is nothing to realign the patch with: put the previous patch file back
-		if patchAbsent {
-			_ = os.Remove(e.patchPath())
-		} else {
-			_ = e.writeMeta(e.patchPath(), patchOrig, 0644)
-		}
-		return
+	} else {
+		_ = e.writeMeta(prop, orig, 0644)
 	}
-	f, p := e.pifAudit(true)
-	_ = e.pifSyncPatch(f, p)
+	if patchAbsent {
+		_ = os.Remove(e.patchPath())
+	} else {
+		_ = e.writeMeta(e.patchPath(), patchOrig, 0644)
+	}
+	if !absent {
+		f, p := e.pifAudit(true)
+		_ = e.pifSyncPatch(f, p)
+	}
 }
 
 var pifPlayProcesses = []string{"com.google.android.gms.unstable", "com.google.android.gms", "com.android.vending"}
@@ -243,17 +246,17 @@ const (
 // pifRespawnDelay lets the killed process die before the next one is requested.
 var pifRespawnDelay = 500 * time.Millisecond
 
+// runCommand is the real command runner of the contour (tests replace it through Engine.runCommand).
+func runCommand(ctx context.Context, name string, args ...string) error {
+	return exec.CommandContext(ctx, name, args...).Run()
+}
+
 // restartPlayServices makes Play Services run DroidGuard again with the new fingerprint: kill the
 // DroidGuard, Play Services and Play Store processes, then ask Android to start its service so the process comes back NOW (a plain
 // kill, which killpi.sh and Integrity Box's restart_google_services do, leaves it dead until some
 // app happens to use DroidGuard, so nothing is spoofed or logged for a long time). The PING intent
 // is the one DroidGuardService itself declares. One `am` call = one JVM start: acceptable, it runs
 // only when a fingerprint was actually installed.
-// runCommand is the real command runner of the contour (tests replace it through Engine.runCommand).
-func runCommand(ctx context.Context, name string, args ...string) error {
-	return exec.CommandContext(ctx, name, args...).Run()
-}
-
 func (e *Engine) restartPlayServices(ctx context.Context) error {
 	if e.restartGMS != nil {
 		return e.restartGMS(ctx)
@@ -279,7 +282,7 @@ func (e *Engine) restartPlayServices(ctx context.Context) error {
 
 // pifProbe restarts Play Services and looks, after a marker with a random code, for the line in
 // which PIF reports spoofing the candidate. Result is accepted|unknown only: PIF never says
-// "refused", so silence is never read as acceptance and never causes a rollback (Law 6).
+// "refused", so silence is never read as acceptance and never causes a rollback.
 func (e *Engine) pifProbe(ctx context.Context, cand pifFile) (string, string) {
 	pol := e.pifPolicy()
 	if !pol.Probe {

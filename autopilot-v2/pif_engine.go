@@ -12,7 +12,7 @@ import (
 
 // PIFStatus is the "pif" block of status.json.
 type PIFStatus struct {
-	State       string    `json:"state"` // absent|invalid|banned|expired|expiring|ok
+	State       string    `json:"state"` // absent|invalid|banned|expired|expiring|ok|custom|off
 	Mode        string    `json:"mode"`
 	ID          string    `json:"id,omitempty"`
 	Incremental string    `json:"incremental,omitempty"`

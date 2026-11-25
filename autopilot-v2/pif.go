@@ -1,9 +1,9 @@
 package main
 
-// PIF fingerprint contour (AUTOPILOT_V4_PIF_DESIGN.md). The keybox contour answers "is the key
+// PIF fingerprint contour. The keybox contour answers "is the key
 // valid and accepted"; this one keeps the OTHER half of the attestation triplet consistent:
 // the Pixel Canary fingerprint that Play Integrity Fork spoofs (custom.pif.prop) and the
-// security patch Tricky Store attests (security_patch.txt). Law 15: one owner of the invariant,
+// security patch Tricky Store attests (security_patch.txt). The invariant this file owns:
 // security_patch.txt must equal SECURITY_PATCH of the active fingerprint.
 
 import (
@@ -201,14 +201,13 @@ type patchFile struct {
 }
 
 var (
-	patchDash  = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	patchEight = regexp.MustCompile(`^\d{8}$`)
 	patchSix   = regexp.MustCompile(`^\d{6}$`)
 )
 
 func normalizeDate(v string) (string, string) {
 	switch {
-	case patchDash.MatchString(v):
+	case pifDate.MatchString(v):
 		return v, "date"
 	case patchEight.MatchString(v):
 		return v[:4] + "-" + v[4:6] + "-" + v[6:], "date8"

@@ -259,9 +259,9 @@ func afterInstallDecision(res probeResult, previous Health, hadPrevious bool) st
 }
 
 // verifyInstalled probes the consumer after a commit and reverts when it refuses the file.
-// The last parameter is intentionally unused: restoring the previous key is cleanup of our
-// own write and must not depend on whether autopilot is still enabled.
-func (e *Engine) verifyInstalled(ctx context.Context, installed []byte, installedHealth, previous Health, previousBytes []byte, _ bool) string {
+// Restoring the previous key is cleanup of our own write, so it deliberately does not depend on
+// whether autopilot is still enabled.
+func (e *Engine) verifyInstalled(ctx context.Context, installed []byte, installedHealth, previous Health, previousBytes []byte) string {
 	spec := e.consumer()
 	if present, _ := e.consumerPresent(spec); !present {
 		return "keep"

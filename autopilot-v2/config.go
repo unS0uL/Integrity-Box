@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -26,10 +27,12 @@ func (e *Engine) configLock(ctx context.Context) (*os.File, error) {
 		}
 	}
 }
+
+// configFlags are the user switches under Box-Brain that the engine owns; generation() fingerprints the same list.
+var configFlags = []string{"autopilot", "disable-default-source", "omk-key", "sim-key"}
+
 func (e *Engine) setFlag(ctx context.Context, name string, on bool) error {
-	switch name {
-	case "autopilot", "disable-default-source", "omk-key", "sim-key":
-	default:
+	if !slices.Contains(configFlags, name) {
 		return errors.New("unsupported configuration flag")
 	}
 	f, err := e.configLock(ctx)

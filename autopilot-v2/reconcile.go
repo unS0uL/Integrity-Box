@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"math"
@@ -21,7 +19,7 @@ import (
 
 func generation(brain string) string {
 	var b strings.Builder
-	for _, n := range []string{"autopilot", "disable-default-source", "omk-key", "sim-key"} {
+	for _, n := range configFlags {
 		fmt.Fprintf(&b, "%s:%t;", n, exists(filepath.Join(brain, n)))
 	}
 	for _, mod := range []string{"teesim", "oh_my_keymint"} {
@@ -125,8 +123,7 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	sum := sha256.Sum256(original)
-	expected := hex.EncodeToString(sum[:])
+	expected := sha256Hex(original)
 	gen := generation(e.brain)
 	tiers := []string{"Megatron", "secondary"}
 	if exists(filepath.Join(e.brain, "disable-default-source")) {
@@ -148,7 +145,7 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 		if tier == "secondary" {
 			data, candidate, err = e.secondary(ctx)
 		} else {
-			data, candidate, err = e.candidate(ctx, "https://github.com/MeowDump/Integrity-Box/releases/download/archive/"+tier, false)
+			data, candidate, err = e.candidate(ctx, pifArchiveBase+tier, false)
 		}
 		if err != nil {
 			continue
@@ -184,14 +181,13 @@ func (e *Engine) cycle(ctx context.Context, automatic bool) error {
 			return nil
 		}
 		// Tricky Store watches its config; no global keystore restart is required.
-		if e.verifyInstalled(ctx, data, candidate, h, original, automatic) == "keep" {
+		if e.verifyInstalled(ctx, data, candidate, h, original) == "keep" {
 			return nil
 		}
 		// The consumer refused this file: refresh compare-and-commit inputs, try the next tier.
 		original, _ = readKey(e.target())
 		h = e.status.Local
-		sum = sha256.Sum256(original)
-		expected = hex.EncodeToString(sum[:])
+		expected = sha256Hex(original)
 	}
 	return errors.New("no suitable replacement; current file preserved")
 }

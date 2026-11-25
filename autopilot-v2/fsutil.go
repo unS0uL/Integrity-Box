@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -42,12 +44,13 @@ func atomic(p string, data []byte, mode os.FileMode) error {
 	if err = os.Rename(n, p); err != nil {
 		return err
 	}
-	d, err := os.Open(filepath.Dir(p))
-	if err != nil {
-		return err
-	}
-	defer d.Close()
-	return d.Sync()
+	return syncDir(filepath.Dir(p))
+}
+
+// sha256Hex is the lowercase hex SHA-256 used for every file fingerprint and pin in the engine.
+func sha256Hex(b []byte) string {
+	s := sha256.Sum256(b)
+	return hex.EncodeToString(s[:])
 }
 
 func lock(p string) (*os.File, error) {

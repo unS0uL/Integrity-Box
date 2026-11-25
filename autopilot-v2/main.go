@@ -181,7 +181,12 @@ func main() {
 			}
 			select {
 			case <-ctx.Done():
+				lerr = ctx.Err()
 			case <-time.After(time.Second):
+			}
+			if ctx.Err() != nil { // SIGTERM/SIGINT: stop waiting instead of spinning through the remaining attempts
+				fmt.Println("pif: interrupted")
+				os.Exit(4)
 			}
 		}
 		if lerr != nil {

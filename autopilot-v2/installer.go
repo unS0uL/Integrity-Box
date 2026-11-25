@@ -3,8 +3,6 @@ package main
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -149,8 +147,7 @@ func (e *Engine) recoverTransaction() error {
 				return fmt.Errorf("recovery backup preflight: %w", er)
 			}
 			if tx.Version == 1 {
-				hash := sha256.Sum256(data)
-				if v.BackupBytes != len(data) || v.BackupSHA256 != hex.EncodeToString(hash[:]) {
+				if v.BackupBytes != len(data) || v.BackupSHA256 != sha256Hex(data) {
 					return errors.New("recovery backup checksum mismatch")
 				}
 			}
@@ -217,8 +214,7 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	sum := sha256.Sum256(old)
-	if hex.EncodeToString(sum[:]) != expected {
+	if sha256Hex(old) != expected {
 		return errors.New("target changed during search")
 	}
 	if bytes.Equal(old, data) {
@@ -269,8 +265,7 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 			if er != nil {
 				return er
 			}
-			hash := sha256.Sum256(before)
-			v.BackupSHA256 = hex.EncodeToString(hash[:])
+			v.BackupSHA256 = sha256Hex(before)
 			v.BackupBytes = len(before)
 			if er = atomic(v.Backup, before, 0600); er != nil {
 				return er
@@ -321,15 +316,17 @@ func (e *Engine) install(data []byte, expected, gen string, automatic bool) erro
 			return fmt.Errorf("post-commit mismatch; rollback: %v", re)
 		}
 	}
-	if err = os.Remove(filepath.Join(dir, "journal.json")); err != nil {
-		return err
+	// The new key is live and verified. If the journal cannot be removed, it would make the next
+	// recovery pass silently roll the key back, so settle that now and report a consistent failure.
+	if err = os.Remove(filepath.Join(dir, "journal.json")); err != nil && !os.IsNotExist(err) {
+		re := e.recoverTransaction()
+		return fmt.Errorf("journal removal failed; rollback: %v", re)
 	}
 	if err = syncDir(dir); err != nil {
-		return err
+		logEvent("journal_sync_failed", "local", 0) // durability of a deletion only: the key itself is committed
 	}
 	committed = true
-	hash := sha256.Sum256(data)
-	if er := writeJSON(filepath.Join(e.ram, "installed-source.json"), installedRecord{hex.EncodeToString(hash[:]), e.status.Source}); er != nil {
+	if er := writeJSON(filepath.Join(e.ram, "installed-source.json"), installedRecord{sha256Hex(data), e.status.Source}); er != nil {
 		logEvent("source_metadata_write_failed", "local", 0)
 	}
 	return nil

@@ -16,9 +16,6 @@ func (e *Engine) knownAnchors() ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > 8192 {
-		return nil, errors.New("anchor metadata size")
-	}
 	var hashes []string
 	if json.Unmarshal(b, &hashes) != nil || len(hashes) > 64 {
 		return nil, errors.New("invalid anchor metadata")
@@ -52,8 +49,10 @@ func (e *Engine) rememberAnchor(hash string) error {
 			return nil
 		}
 	}
+	// Bounded like the rejected-fingerprint list: when full, forget the oldest identity instead of
+	// refusing every future Megatron2 install for good.
 	if len(hashes) >= 64 {
-		return errors.New("anchor metadata capacity reached")
+		hashes = hashes[len(hashes)-63:]
 	}
 	hashes = append(hashes, hash)
 	return writeJSON(filepath.Join(e.brain, ".autopilot-known-anchors.json"), hashes)

@@ -141,7 +141,7 @@ func (e *Engine) secondary(ctx context.Context) ([]byte, Health, error) {
 		if t := catalogExpiry(v.Expires); !t.IsZero() && t.Before(time.Now()) {
 			continue
 		}
-		if len(v.Source) > 80 || strings.ContainsAny(v.Source, "/\\\r\n") {
+		if !validSourceName(v.Source) {
 			continue
 		}
 		var ver string

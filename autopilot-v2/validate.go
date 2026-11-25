@@ -5,10 +5,8 @@ import (
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/x509"
 	_ "embed"
-	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"encoding/xml"
@@ -16,6 +14,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -41,8 +40,7 @@ func trusted(h Health) bool {
 		if err != nil {
 			continue
 		}
-		hash := sha256.Sum256(c.RawSubjectPublicKeyInfo)
-		pins[hex.EncodeToString(hash[:])] = true
+		pins[sha256Hex(c.RawSubjectPublicKeyInfo)] = true
 	}
 	if len(h.Roots) == 0 {
 		return false
@@ -116,8 +114,7 @@ func signer(data string) (crypto.Signer, error) {
 
 func inspect(data []byte, now time.Time) (Health, error) {
 	h := Health{State: "invalid"}
-	sum := sha256.Sum256(data)
-	h.Fingerprint = hex.EncodeToString(sum[:])
+	h.Fingerprint = sha256Hex(data)
 	if len(data) == 0 || len(data) > maxXML {
 		return h, errors.New("XML size")
 	}
@@ -197,8 +194,7 @@ func inspect(data []byte, now time.Time) (Health, error) {
 				if !c.BasicConstraintsValid || !c.IsCA || c.KeyUsage&x509.KeyUsageCertSign == 0 {
 					return h, errors.New("keybox certificate cannot sign attestations")
 				}
-				id := sha256.Sum256(c.Raw)
-				identities = append(identities, hex.EncodeToString(id[:]))
+				identities = append(identities, sha256Hex(c.Raw))
 				a, _ := x509.MarshalPKIXPublicKey(s.Public())
 				b, _ := x509.MarshalPKIXPublicKey(c.PublicKey)
 				if !bytes.Equal(a, b) {
@@ -235,16 +231,14 @@ func inspect(data []byte, now time.Time) (Health, error) {
 				return h, errors.New("unsupported certificate chain constraints")
 			}
 		}
-		rootHash := sha256.Sum256(previous.RawSubjectPublicKeyInfo)
-		h.Roots = append(h.Roots, hex.EncodeToString(rootHash[:]))
+		h.Roots = append(h.Roots, sha256Hex(previous.RawSubjectPublicKeyInfo))
 		// Require a self-signed terminal certificate. Trust provenance remains separate.
 		if e := previous.CheckSignature(previous.SignatureAlgorithm, previous.RawTBSCertificate, previous.Signature); e != nil {
 			return h, errors.New("terminal signature")
 		}
 	}
 	sort.Strings(identities)
-	identity := sha256.Sum256([]byte(strings.Join(identities, "|")))
-	h.Identity = hex.EncodeToString(identity[:])
+	h.Identity = sha256Hex([]byte(strings.Join(identities, "|")))
 	if now.Year() < 2025 {
 		h.State = "time_unknown"
 	}
@@ -253,8 +247,11 @@ func inspect(data []byte, now time.Time) (Health, error) {
 
 func (e *Engine) health() Health {
 	b, err := readKey(e.target())
-	if err != nil {
+	if os.IsNotExist(err) {
 		return Health{State: "missing"}
+	}
+	if err != nil { // unreadable, oversized or not a regular file: present but unusable, not "missing"
+		return Health{State: "invalid"}
 	}
 	h, err := inspect(b, time.Now())
 	if err != nil {

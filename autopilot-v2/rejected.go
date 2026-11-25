@@ -1,19 +1,12 @@
 package main
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"path/filepath"
 	"strings"
 )
 
 const maxRejected = 64
-
-func sha256Hex(b []byte) string {
-	s := sha256.Sum256(b)
-	return hex.EncodeToString(s[:])
-}
 
 func (e *Engine) rejectedPath() string { return filepath.Join(e.brain, ".autopilot-rejected.json") }
 

@@ -47,7 +47,7 @@ func (e *Engine) importKey(ctx context.Context, path string) error {
 	if e.slot != "" {
 		return nil // extra slots are not the file the consumer is probed on
 	}
-	if result := e.verifyInstalled(ctx, data, h, previous, old, false); result != "keep" {
+	if result := e.verifyInstalled(ctx, data, h, previous, old); result != "keep" {
 		return errors.New("the consumer refused the imported key (" + result + ")")
 	}
 	return nil
