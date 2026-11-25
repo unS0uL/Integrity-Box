@@ -133,7 +133,8 @@ manage_safemode() {
     ui_print "  Press a volume key to make your choice..."
     ui_print " "
     ui_print "----------------------------------------"
-    # No process substitution: Magisk's busybox ash rejects it and the whole installer dies
+    # No process substitution: Magisk's busybox parses it, but other installer shells (KernelSU/APatch
+    # busybox, toybox sh) may not, and a parse error would abort the whole installer
     line=$(timeout "$timeout_seconds" getevent -ql 2>/dev/null | awk '/KEY_VOLUME(UP|DOWN)/ {print; exit}')
 
     if [ -z "$line" ]; then

@@ -1,8 +1,9 @@
 #!/bin/sh
-# Magisk runs the installer and the module scripts with busybox ash, not bash. Anything bash-only is a syntax
-# error there that aborts the whole script (Beta-6's volume-key safemode prompt used `read < <(...)`).
-# Parse every module shell script with the strictest shell on hand and refuse bash-only redirections.
-# hello.sh is exempt from the parse: dash trips over its ASCII art in a $(...) heredoc, ash does not.
+# The installer and the module scripts run under whatever busybox/sh the root manager ships (Magisk, KernelSU,
+# APatch). Magisk's busybox accepts some bash-isms (verified: `sh -n` of `read < <(...)` passes there), other
+# shells do not, and a parse error aborts the whole script. Parse every module script with dash (strict POSIX)
+# and refuse process substitution / here-strings. hello.sh is exempt from the parse: dash trips over its
+# ASCII art in a $(...) heredoc.
 # Run: sh autopilot-v2/test_portable_syntax.sh
 set -eu
 HERE=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
