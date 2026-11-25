@@ -85,6 +85,7 @@ else
 fi
 
 echo "== shell"
+step "module scripts parse under ash-compatible dash, no bash-only redirections" sh "$HERE/test_portable_syntax.sh"
 for sh_ in sh dash bash; do
     command -v "$sh_" >/dev/null 2>&1 || continue
     step "test_doctor.sh under $sh_" env TEST_SH="$sh_" sh "$HERE/test_doctor.sh"
@@ -92,6 +93,7 @@ for sh_ in sh dash bash; do
     step "test_action_pif.sh under $sh_" "$sh_" "$HERE/test_action_pif.sh"
     step "test_key_shim.sh under $sh_" "$sh_" "$HERE/test_key_shim.sh"
     step "test_boot_wait.sh under $sh_" "$sh_" "$HERE/test_boot_wait.sh"
+    step "test_teesim_gates.sh under $sh_" "$sh_" "$HERE/test_teesim_gates.sh"
     step "test_uninstall_continues.sh under $sh_" "$sh_" "$HERE/test_uninstall_continues.sh"
 done
 if command -v shellcheck >/dev/null 2>&1; then

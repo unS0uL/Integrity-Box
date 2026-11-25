@@ -1,18 +1,36 @@
 #!/system/bin/sh
 
-TSIM_DIR="/data/adb/teesim"
+# Paths are overridable so the host test can run this against a scratch tree.
+MODS="${TEESIM_MODS:-/data/adb/modules}"
+BRAIN="${TEESIM_BRAIN:-/data/adb/Box-Brain}"
+TSIM_DIR="${TEESIM_DIR:-/data/adb/teesim}"
 CONFIG_JSON="$TSIM_DIR/config.json"
-PIF_PROP="/data/adb/modules/playintegrityfix/custom.pif.prop"
-SEC_PATCH="/data/adb/tricky_store/security_patch.txt"
-TARGET_TXT="/data/adb/tricky_store/target.txt"
+PIF_PROP="$MODS/playintegrityfix/custom.pif.prop"
+SEC_PATCH="${TEESIM_TRICKY:-/data/adb/tricky_store}/security_patch.txt"
+TARGET_TXT="${TEESIM_TRICKY:-/data/adb/tricky_store}/target.txt"
+
+# Do not run when TeeSim is absent or disabled.
+[ -d "$MODS/teesim" ] || exit 0
+[ ! -f "$MODS/teesim/disable" ] || exit 0
+
+# The WebUI (Addon -> TEE Simulator) lets the user choose what is updated: build fields and/or target apps.
+# Beta-6 dropped these two switches and rewrote the whole config on every run; honour them again.
+PIXEL=0; TARGET=0
+[ -f "$BRAIN/sim-pixel" ] && PIXEL=1
+[ -f "$BRAIN/sim-target" ] && TARGET=1
+[ "$PIXEL$TARGET" != 00 ] || exit 0
 
 [ -f "$CONFIG_JSON" ] || exit 0
-[ -f "$PIF_PROP" ] || exit 0
-[ -f "$SEC_PATCH" ] || exit 0
-[ -f "$TARGET_TXT" ] || exit 0
+if [ "$PIXEL" = 1 ]; then
+    [ -f "$PIF_PROP" ] || exit 0
+    [ -f "$SEC_PATCH" ] || exit 0
+fi
+if [ "$TARGET" = 1 ]; then
+    [ -f "$TARGET_TXT" ] || exit 0
+fi
 
 TMP="${CONFIG_JSON}.tmp.$$"
-APPS_TMP="/data/local/tmp/.teesim_apps_$$"
+APPS_TMP="${TEESIM_TMP:-/data/local/tmp}/.teesim_apps_$$"
 
 NOW_MONTHS=0
 NOW_YEAR=$(date +%Y 2>/dev/null)
@@ -152,9 +170,12 @@ resolve_patch() {
     return 1
 }
 
-SYSTEM_PATCH=$(resolve_patch "system") || fail "no usable security patch level"
-VENDOR_PATCH=$(resolve_patch "vendor") || fail "no usable security patch level"
-BOOT_PATCH=$(resolve_patch "boot") || fail "no usable security patch level"
+SYSTEM_PATCH=""; VENDOR_PATCH=""; BOOT_PATCH=""
+if [ "$PIXEL" = 1 ]; then
+    SYSTEM_PATCH=$(resolve_patch "system") || fail "no usable security patch level"
+    VENDOR_PATCH=$(resolve_patch "vendor") || fail "no usable security patch level"
+    BOOT_PATCH=$(resolve_patch "boot") || fail "no usable security patch level"
+fi
 
 > "$APPS_TMP" || fail "cannot write the apps list"
 while IFS= read -r line || [ -n "$line" ]; do
@@ -177,9 +198,11 @@ case "$OS_RELEASE" in ''|*[!0-9]*) OS_RELEASE="17" ;; esac
 
 APPS="$APPS_TMP" BRAND="$BRAND" DEVICE="$DEVICE" PRODUCT="$PRODUCT" \
 MANUFACTURER="$MANUFACTURER" MODEL="$MODEL" OSV="$OS_RELEASE" MODE="$MODE" \
-HAS_MODE="$HAS_MODE" SP="$SYSTEM_PATCH" VP="$VENDOR_PATCH" BP="$BOOT_PATCH" \
+HAS_MODE="$HAS_MODE" PIXEL="$PIXEL" TARGET="$TARGET" SP="$SYSTEM_PATCH" VP="$VENDOR_PATCH" BP="$BOOT_PATCH" \
 awk "$AWK_LIB"'
 BEGIN {
+    px = ENVIRON["PIXEL"] + 0
+    tg = ENVIRON["TARGET"] + 0
     apps_file = ENVIRON["APPS"]
     while ((getline item < apps_file) > 0) items[++n] = item
     close(apps_file)
@@ -193,21 +216,23 @@ BEGIN {
         next
     }
     line = $0
-    if (lvl == 0 && line ~ /"patchLevel"[[:space:]]*:[[:space:]]*\{/) lvl = 1
+    if (px && lvl == 0 && line ~ /"patchLevel"[[:space:]]*:[[:space:]]*\{/) lvl = 1
     if (lvl == 1) {
         line = setstr(line, "system", ENVIRON["SP"])
         line = setstr(line, "vendor", ENVIRON["VP"])
         line = setstr(line, "boot", ENVIRON["BP"])
         if (line ~ /\}/) lvl = 0
     }
-    line = setstr(line, "osVersion", ENVIRON["OSV"])
-    line = setstr(line, "brand", ENVIRON["BRAND"])
-    line = setstr(line, "device", ENVIRON["DEVICE"])
-    line = setstr(line, "product", ENVIRON["PRODUCT"])
-    line = setstr(line, "manufacturer", ENVIRON["MANUFACTURER"])
-    line = setstr(line, "model", ENVIRON["MODEL"])
-    line = setstr(line, "mode", ENVIRON["MODE"])
-    if (apps == 0 && match(line, /"apps"[[:space:]]*:[[:space:]]*\[/)) {
+    if (px) {
+        line = setstr(line, "osVersion", ENVIRON["OSV"])
+        line = setstr(line, "brand", ENVIRON["BRAND"])
+        line = setstr(line, "device", ENVIRON["DEVICE"])
+        line = setstr(line, "product", ENVIRON["PRODUCT"])
+        line = setstr(line, "manufacturer", ENVIRON["MANUFACTURER"])
+        line = setstr(line, "model", ENVIRON["MODEL"])
+        line = setstr(line, "mode", ENVIRON["MODE"])
+    }
+    if (tg && apps == 0 && match(line, /"apps"[[:space:]]*:[[:space:]]*\[/)) {
         apps = 1
         head = substr(line, 1, RSTART + RLENGTH - 1)
         tail = substr(line, RSTART + RLENGTH)
@@ -220,19 +245,20 @@ BEGIN {
         next
     }
     print line
-    if (ENVIRON["HAS_MODE"] + 0 == 0 && added == 0 && line ~ /"keybox"[[:space:]]*:/) {
+    if (px && ENVIRON["HAS_MODE"] + 0 == 0 && added == 0 && line ~ /"keybox"[[:space:]]*:/) {
         match(line, /^[[:space:]]*/)
         print substr(line, RSTART, RLENGTH) "\"mode\": \"" ENVIRON["MODE"] "\","
         added = 1
     }
 }' "$CONFIG_JSON" > "$TMP" || fail "could not rewrite the config"
 
-awk "$AWK_LIB"'
+PIXEL="$PIXEL" awk "$AWK_LIB"'
 { buf = buf $0 "\n" }
 END {
     if (!json_ok(buf)) exit 1
     if (index(buf, "\"keybox\"") == 0) exit 1
     if (index(buf, "\"apps\"") == 0) exit 1
+    if (ENVIRON["PIXEL"] + 0 == 0) exit 0
     at = index(buf, "\"patchLevel\"")
     if (at == 0) exit 1
     seg = substr(buf, at)

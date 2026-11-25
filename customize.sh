@@ -133,9 +133,10 @@ manage_safemode() {
     ui_print "  Press a volume key to make your choice..."
     ui_print " "
     ui_print "----------------------------------------"
-    read -r -t "$timeout_seconds" line < <(getevent -ql | awk '/KEY_VOLUME/ {print; exit}')
+    # No process substitution: Magisk's busybox ash rejects it and the whole installer dies
+    line=$(timeout "$timeout_seconds" getevent -ql 2>/dev/null | awk '/KEY_VOLUME(UP|DOWN)/ {print; exit}')
 
-    if [ $? -eq 142 ]; then
+    if [ -z "$line" ]; then
         debug " ✦ Timeout: enabling safemode by default"
         touch "$FLAG/safemode" 2>/dev/null
         return 0
