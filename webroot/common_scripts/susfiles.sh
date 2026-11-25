@@ -49,7 +49,7 @@ TARGETS="
 /sdcard/Download/*_action_log_2026*|file
 "
 
-# IFS='|' (not ${line%|*}: on mksh a '|' inside a parameter pattern is an alternation and nothing is cut, AL013)
+# IFS='|' (not ${line%|*}: on mksh a '|' inside a parameter pattern is an alternation and nothing is cut)
 echo "$TARGETS" | while IFS='|' read -r path type; do
     [ -z "$path" ] && continue
     

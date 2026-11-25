@@ -4,6 +4,19 @@
 # (autopilot-v2/pif*.go): a script must never undo a choice the engine respects.
 # PIF_BOX overrides the data directory (tests only).
 
+# pif_patch_from_prop [FILE]: the SECURITY_PATCH of a fingerprint file as YYYY-MM-DD (default: the module's
+# custom.pif.prop). Fails when the file or the value is missing or malformed: callers never invent a date.
+# The single reader of that field for the installer, the boot script and the Action button.
+pif_patch_from_prop() {
+    _pif_f="${1:-${MODPATH:-/data/adb/modules/playintegrityfix}/custom.pif.prop}"
+    [ -f "$_pif_f" ] || return 1
+    _pif_v="$(sed -n 's/^SECURITY_PATCH=//p' "$_pif_f" | head -n 1 | tr -d ' \t\r')"
+    case "$_pif_v" in
+        [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) echo "$_pif_v" ;;
+        *) return 1 ;;
+    esac
+}
+
 # pif_conf_get KEY: the last value of KEY in autopilot.conf, lowercased ("" when absent).
 pif_conf_get() {
     _pif_conf="${PIF_BOX:-/data/adb/Box-Brain}/autopilot.conf"

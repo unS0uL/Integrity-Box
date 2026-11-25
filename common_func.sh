@@ -500,23 +500,17 @@ update_targets() {
 
 # Single source of truth for the spoofed security patch: the SECURITY_PATCH of the
 # active PIF fingerprint (custom.pif.prop). Tricky Store's security_patch.txt must
-# equal it, otherwise DEVICE integrity fails (incident 2026-11-16, Law 15).
+# equal it, otherwise DEVICE integrity fails (incident 2026-11-16).
 # Prints YYYY-MM-DD, or returns 1 when the file or value is missing/invalid.
-patch_from_pif() {
-  local f="${1:-${MODPATH:-/data/adb/modules/playintegrityfix}/custom.pif.prop}" v
-  [ -f "$f" ] || return 1
-  v="$(sed -n 's/^SECURITY_PATCH=//p' "$f" | head -n 1 | tr -d ' \t\r')"
-  case "$v" in
-    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) echo "$v" ;;
-    *) return 1 ;;
-  esac
-}
+patch_from_pif() { pif_patch_from_prop "$@"; }
 
-# Policy helpers shared with the boot script (service.d/prop.sh): see pif_policy.sh.
+# Policy helpers shared with the boot script (service.d/prop.sh): see pif_policy.sh. Without them nothing is
+# written (fail closed), instead of ignoring the user's Custom-Patch / pif_mode / pif_sync_patch choices.
 _pif_policy="${MODPATH:-/data/adb/modules/playintegrityfix}/pif_policy.sh"
 [ -f "$_pif_policy" ] && . "$_pif_policy"
 unset _pif_policy
-command -v pif_may_write_patch >/dev/null 2>&1 || pif_may_write_patch() { [ ! -f /data/adb/Box-Brain/patch ]; }
+command -v pif_may_write_patch >/dev/null 2>&1 || pif_may_write_patch() { return 1; }
+command -v pif_patch_from_prop >/dev/null 2>&1 || pif_patch_from_prop() { return 1; }
 
 handle_security_patch() {
   local BOX="/data/adb/Box-Brain"

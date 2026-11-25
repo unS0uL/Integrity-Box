@@ -708,7 +708,7 @@ function checkAutopilot() {
   });
 }
 
-// Plain-text summary of the PIF fingerprint and the Tricky Store patch pair (AUTOPILOT_V4_PIF_DESIGN.md).
+// Plain-text summary of the PIF fingerprint and the Tricky Store patch pair.
 function describePIF(pif) {
   if (!pif || !pif.state || pif.state === 'off') return '';
   const names = { ok: 'ok', expiring: 'expires soon', expired: 'expired', banned: 'withdrawn by the maintainer', invalid: 'unreadable', absent: 'not found' };

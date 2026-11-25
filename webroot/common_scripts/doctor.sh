@@ -54,6 +54,10 @@ conf_int() {
     case "$v" in
         ''|*[!0-9]*) printf '%s' "$4"; return 0 ;;
     esac
+    # strip leading zeros (042 would be read as octal by $(( )), 08 as an error) and cap the length (huge numbers)
+    v=${v#"${v%%[!0]*}"}
+    [ -n "$v" ] || v=0
+    [ "${#v}" -le 6 ] || v=999999
     if [ "$v" -lt "$2" ]; then v=$2; fi
     if [ "$v" -gt "$3" ]; then v=$3; fi
     printf '%s' "$v"
@@ -350,7 +354,7 @@ check_engine() {
     esac
 }
 
-# ---- PIF fingerprint and the Tricky Store patch (Law 15) ----
+# ---- PIF fingerprint and the Tricky Store patch ----
 # The attestation triplet is key + fingerprint + patch. The keybox checks above cannot see a
 # fingerprint that expired or a patch that disagrees with it; both turn DEVICE integrity red
 # while everything else looks healthy (incident 2026-11-16).
@@ -361,11 +365,6 @@ PATCHFILE=${AP_PATCH:-$KDIR/security_patch.txt}
 # Rules are identical to the engine's parser (autopilot-v2/pif.go); pif_agreement_test.go keeps them so.
 pif_summary() {
     awk '
-        function dn(s,   t, y, m, d) {
-            split(s, t, "-"); y = t[1] + 0; m = t[2] + 0; d = t[3] + 0
-            if (m <= 2) { y--; m += 12 }
-            return int(365.25 * y) + int(30.6001 * (m + 1)) + d
-        }
         function validdate(s,   t, y, m, d, dim) {
             if (s !~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/) return 0
             split(s, t, "-"); y = t[1] + 0; m = t[2] + 0; d = t[3] + 0

@@ -429,12 +429,10 @@ fi
 
 [ -d "$TRICKY/keys" ] && rm -rf "$TRICKY/keys"
 if [ ! -f $TRICKY/security_patch.txt ]; then
-# The patch must equal the PIF fingerprint's SECURITY_PATCH (Law 15). Without a valid one nothing is
+# The patch must equal the PIF fingerprint's SECURITY_PATCH. Without a valid one nothing is
 # invented: Tricky Store then simply has no patch override.
-INIT_PATCH="$(sed -n 's/^SECURITY_PATCH=//p' "$MODPATH/custom.pif.prop" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
-case "$INIT_PATCH" in
-    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) echo "all=$INIT_PATCH" > $TRICKY/security_patch.txt ;;
-esac
+. "$MODPATH/pif_policy.sh"
+INIT_PATCH="$(pif_patch_from_prop "$MODPATH/custom.pif.prop")" && echo "all=$INIT_PATCH" > "$TRICKY/security_patch.txt"
 fi
  
 install_module
@@ -725,16 +723,14 @@ cat <<'EOF' > "$boot/prop.sh"
 #!/system/bin/sh
 
 # CONFIG
-# The patch is whatever the active PIF fingerprint declares (Law 15: one owner of the invariant,
+# The patch is whatever the active PIF fingerprint declares (one owner of the invariant,
 # security_patch.txt == custom.pif.prop SECURITY_PATCH). There is NO literal fallback: without a valid
 # patch in the fingerprint this script leaves the patch alone.
 PIF_PROP="/data/adb/modules/playintegrityfix/custom.pif.prop"
 PIF_POLICY="/data/adb/modules/playintegrityfix/pif_policy.sh"
-PATCH_DATE="$(sed -n 's/^SECURITY_PATCH=//p' "$PIF_PROP" 2>/dev/null | head -n 1 | tr -d ' \t\r')"
-case "$PATCH_DATE" in
-    [0-9][0-9][0-9][0-9]-[01][0-9]-[0-3][0-9]) ;;
-    *) PATCH_DATE="" ;;
-esac
+[ -f "$PIF_POLICY" ] && . "$PIF_POLICY"
+PATCH_DATE=""
+command -v pif_patch_from_prop >/dev/null 2>&1 && PATCH_DATE="$(pif_patch_from_prop "$PIF_PROP")"
 FILE_PATH="/data/adb/tricky_store/security_patch.txt"
 SKIP_FILE="/data/adb/Box-Brain/skip"
 LOG_DIR="/data/adb/Box-Brain/Integrity-Box-Logs"
@@ -804,8 +800,7 @@ fi
 
 # SAVE PATCH DATE (only when the policy allows it, and without touching a file that is already right)
 WRITE_FILE=1
-if [ -f "$PIF_POLICY" ]; then
-    . "$PIF_POLICY"
+if command -v pif_may_write_patch >/dev/null 2>&1; then
     pif_may_write_patch || WRITE_FILE=0
 fi
 if [ "$WRITE_FILE" = 1 ]; then
