@@ -225,6 +225,9 @@ func pifEngine(t *testing.T, pifText, patchText string) (*Engine, string, string
 		}
 	}
 	e := &Engine{moduleRoot: mod, root: ts, ram: dir, brain: dir, policy: defaultPolicy()}
+	// The fixtures describe the incident of 2026-11-16 (fingerprints valid until 2026-11-27): the wall clock must not
+	// decide whether they are "expiring". A test that needs another day sets e.clock itself.
+	e.clock = func() time.Time { return time.Date(2026, 11, 17, 12, 0, 0, 0, time.UTC) }
 	return e, propPath, patchPath
 }
 
