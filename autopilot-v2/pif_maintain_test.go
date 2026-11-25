@@ -841,7 +841,8 @@ func TestInstallDetectsAWriteThatStoredSomethingElse(t *testing.T) {
 	if m.propText() != octoberPIF || m.patchText() != "all=2026-10-05\n" {
 		t.Fatalf("the previous pair must be back:\n%s\npatch %q", m.propText(), m.patchText())
 	}
-	if !strings.Contains(m.e.status.PIF.Reason, "readback differs") || m.restart != 0 || m.e.pifFailures != 1 {
+	// The install-level message, not the patch-sync one ("patch file readback differs") that also contains the words.
+	if !strings.Contains(m.e.status.PIF.Reason, "readback differs; previous state restored") || m.restart != 0 || m.e.pifFailures != 1 {
 		t.Fatalf("reason=%q restarts=%d failures=%d", m.e.status.PIF.Reason, m.restart, m.e.pifFailures)
 	}
 }
