@@ -1,5 +1,5 @@
-162e1c1951bf8311a3e21d1035dfc95cab0c8118dcc208210f08452990ec918f  box-autopilot
+53199b1d979f1966b215b3b2e9ab5842d44a8925465f6f5d9c33ba24832d4351  box-autopilot
 # toolchain: go version go1.27.2 darwin/amd64
 # build: GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w" .
-# source: git tree of autopilot-v2 at the build commit = 05e687484cc709cbed88d3dc4b609209ed58d2c9
+# source: git tree of autopilot-v2 at the build commit = c944d3f2a47e89cf8fa9b218bafaa77aff6e8fba
 # verify: sh autopilot-v2/verify_binary.sh
