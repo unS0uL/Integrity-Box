@@ -94,6 +94,7 @@ for sh_ in sh dash bash; do
     step "test_key_shim.sh under $sh_" "$sh_" "$HERE/test_key_shim.sh"
     step "test_boot_wait.sh under $sh_" "$sh_" "$HERE/test_boot_wait.sh"
     step "test_teesim_gates.sh under $sh_" "$sh_" "$HERE/test_teesim_gates.sh"
+    step "test_trim_logs.sh under $sh_" "$sh_" "$HERE/test_trim_logs.sh"
     step "test_uninstall_continues.sh under $sh_" "$sh_" "$HERE/test_uninstall_continues.sh"
 done
 if command -v shellcheck >/dev/null 2>&1; then
