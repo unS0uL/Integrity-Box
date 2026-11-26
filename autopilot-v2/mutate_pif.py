@@ -15,7 +15,7 @@ LIFE = {'unverified clock polls every 30 min', 'failed listing marks the denylis
 # behaviour (the flag is cleared both when a cycle starts and when the contour consumes it).
 M_RUNNER = {'user-chosen patch ignored by the boot script policy': 'policy', 'doctor fails a user-chosen patch': 'doctor'}
 EQUIVALENT = {'fresh-clock flag not consumed', 'cycle does not reset the clock flag'}
-RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted|Oversized|UnknownSource|RealCommandRunner|PolicyDefaults|ZeroPolicy|ColonFields|ImpossibleDate|EveryPIFEndpoint|NativeCurl|FailedFirstInstall'
+RUN = 'PIF|Maintain|Probe|Eligibility|RefreshBanned|Patch|Incident|Audit|Classify|Release|Denylist|Google|NewestCanary|Generated|Remote|Install|Strict|Failed|Cooldown|Budget|DoctorAgrees|PlayServices|Restore|WriteLock|Torn|Detects|Empty|TestCycle|UserChosen|Clock|Deadline|EachMaintain|AStable|AMissing|Undated|BusyLock|EarlyReturn|Unrepairable|UnverifiedClock|SlowDenylist|ListingDown|Listing|NeverTrusted|Oversized|UnknownSource|RealCommandRunner|PolicyDefaults|ZeroPolicy|ColonFields|ImpossibleDate|EveryPIFEndpoint|NativeCurl|FailedFirstInstall|BannedFingerprint|ExpiringFingerprint|RidesAlong|GoogleSourceIs'
 
 M = [
     ("curl may negotiate HTTP/2 again", 'transport.go', '"--include", "--http1.1",', '"--include",'),
@@ -65,6 +65,9 @@ M = [
     ("an empty marker dir counts as a choice", 'pif_engine.go', 'return err == nil && len(entries) > 0', 'return err == nil && len(entries) >= 0'),
     ("user-chosen patch ignored by the boot script policy", '../pif_policy.sh', '    [ -n "$(ls -A "${PIF_BOX:-/data/adb/Box-Brain}/Custom-Patch" 2>/dev/null)" ] && return 1\n', ''),
     ("doctor fails a user-chosen patch", '../webroot/common_scripts/doctor.sh', '            elif [ -n "$(ls -A "$BRAIN/Custom-Patch" 2>/dev/null)" ]; then', '            elif false; then'),
+    ("banned fingerprint searched only every 6h", 'pif_install.go', 'var pifBannedSearchEvery = time.Hour', 'var pifBannedSearchEvery = 6 * time.Hour'),
+    ("denylist not refreshed with the search of a banned fingerprint", 'pif_install.go', 'if timeOK && (!automatic || urgent || e.uptime() >= e.pifBannedDue) {', 'if timeOK && (!automatic || urgent && false || e.uptime() >= e.pifBannedDue) {'),
+    ("google asked on every search", 'pif_source.go', 'if e.uptime() < e.pifGoogleDue {', 'if false {'),
     ("readback not checked", 'pif_install.go', 'if err != nil || !bytes.Equal(back, data) {', 'if err != nil || !bytes.Equal(back, data) && false {'),
 ]
 

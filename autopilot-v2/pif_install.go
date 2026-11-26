@@ -30,6 +30,15 @@ verboseLogs=0`
 // pifRefreshBudget is the slice of the budget the denylist refresh may use (a variable for the tests).
 var pifRefreshBudget = 18 * time.Second
 
+// pifBannedSearchEvery is how soon a replacement is searched again while the installed fingerprint is banned
+// and nothing eligible exists yet. Short, because every hour without a working fingerprint is an hour of
+// failing DEVICE integrity; the Google source stays on its own slower pace (pifGoogleEvery).
+var pifBannedSearchEvery = time.Hour
+
+// pifGoogleEvery is the minimum gap between two queries of the Google Flash Tool source from one phone, whatever
+// the state: it is the heavier source (a page plus an API call) and must not be hit by every device at once.
+var pifGoogleEvery = 6 * time.Hour
+
 const (
 	pifBudget       = 45 * time.Second // the whole fingerprint maintenance of one cycle
 	pifMaxBackoff   = 24 * time.Hour
@@ -79,7 +88,10 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	e.loadBanned()
 	cleanStale(filepath.Dir(e.pifPropPath()), pifStaleTmpAge)
 	cleanStale(e.root, pifStaleTmpAge)
-	if timeOK && (!automatic || e.uptime() >= e.pifBannedDue) {
+	// The denylist rides along with the replacement search: while the fingerprint is withdrawn or dead, every
+	// search pass refreshes it with the same budget, so a new ban is known no later than the next search.
+	urgent := (e.status.PIF.State == "banned" || e.status.PIF.State == "expired") && e.uptime() >= e.pifSearchDue
+	if timeOK && (!automatic || urgent || e.uptime() >= e.pifBannedDue) {
 		wait := 6 * time.Hour
 		// the denylist refresh gets its own slice of the budget: a slow network must not eat the search
 		refreshCtx, stop := context.WithTimeout(ctx, pifRefreshBudget)
@@ -118,6 +130,9 @@ func (e *Engine) pifMaintain(parent context.Context, automatic bool) {
 	cand, why := e.pifFindCandidate(ctx, cur, state, pol)
 	if cand == nil {
 		wait := 6 * time.Hour
+		if state == "banned" {
+			wait = pifBannedSearchEvery // withdrawn fingerprint: look again soon (archive only, see pifFindCandidate)
+		}
 		if strings.HasSuffix(why, "_unavailable") {
 			e.pifSearchFails++
 			wait = pifBackoff(e.pifSearchFails)

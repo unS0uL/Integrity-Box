@@ -117,4 +117,6 @@ Example: if a Tricky Store update changes its log wording, add `consumer.tricky_
 
 ## Doctor
 
+Fingerprint search pace: a replacement is searched when the fingerprint is expiring, expired, banned or absent, normally every six hours (with growing pauses while sources are unreachable). While the installed fingerprint is banned and nothing eligible exists, the archive is polled hourly and the denylist is refreshed in the same pass; the Google source is asked at most once every six hours by one phone. `pif_follow_latest = on` keeps the newest Canary installed, so a ban of the old build finds the new one already in place.
+
 `sh webroot/common_scripts/autopilot.sh doctor` is independent of the compiled engine (it works even when the binary is missing). It prints `OK/WARN/FAIL` lines for tools, consumer, key format, certificate count and validity (parsed from DER with `awk`), the acceptance probe and the engine status, never prints key material, and exits 1 on any FAIL. It reads the same `autopilot.conf` keys as the engine for what it checks (`renew_before_hours` and `probe_settle_seconds` with the same clamping, and `consumer.tricky_store.modules`, `.tag`, `.rejection` with the same validation). Host tests: `sh autopilot-v2/test_doctor.sh`.

@@ -226,6 +226,10 @@ func (e *Engine) pifFindCandidate(ctx context.Context, cur pifFile, curState str
 				cand, err = parsePIF(body)
 			}
 		case "google":
+			if e.uptime() < e.pifGoogleDue {
+				continue // asked recently: the archive is polled more often than this source
+			}
+			e.pifGoogleDue = e.uptime() + pifGoogleEvery.Seconds()
 			cand, err = e.pifGoogleCandidate(ctx, cur)
 		default:
 			continue
