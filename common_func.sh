@@ -168,8 +168,8 @@ launch_webui() {
 update_module_description() {
   MODPATH="/data/adb/modules/playintegrityfix"
   PROP="$MODPATH/module.prop"
-  BAK="$PROP.bak"
   P="$MODPATH/custom.pif.prop"
+  BRAIN="/data/adb/Box-Brain"
 
   # Find BusyBox
   bb=""
@@ -183,26 +183,39 @@ update_module_description() {
   done
   [ -z "$bb" ] && return 0
 
-  # Read device identity
-  MODEL=""
-  DEVICE=""
-  ID=""
+  if [ ! -d "$MODPATH/zygisk" ]; then
+    DEVICE=$(getprop ro.product.device)
+    PATCH=$(getprop ro.build.version.security_patch)
 
-  if [ -f "$P" ]; then
-    MODEL=$("$bb" sed -n 's/^MODEL=//p' "$P" | "$bb" head -n1)
-    DEVICE=$("$bb" sed -n 's/^DEVICE=//p' "$P" | "$bb" head -n1)
-    ID=$("$bb" sed -n 's/^ID=//p' "$P" | "$bb" head -n1)
+    [ -z "$DEVICE" ] && DEVICE="Unknown"
+    [ -z "$PATCH" ] && PATCH="Unknown"
+
+    DESC="⏤͟͞𝗣𝗜𝗫𝗘𝗟 𝗠𝗢𝗗𝗘 🍋‍🟩 •• $DEVICE | $PATCH"
+  else
+    # Read spoofed identity
+    MODEL=""
+    INITSDK=""
+
+    if [ -f "$P" ]; then
+      MODEL=$("$bb" sed -n 's/^MODEL=//p' "$P" | "$bb" head -n1)
+      INITSDK=$("$bb" sed -n 's/^DEVICE_INITIAL_SDK_INT=//p' "$P" | "$bb" head -n1)
+    fi
+
+    [ -z "$MODEL" ] && MODEL="Unknown"
+    [ -z "$INITSDK" ] && INITSDK="Unknown"
+
+    # Status indicators
+    STATUS=""
+
+    [ -f "$BRAIN/safemode" ] && STATUS="${STATUS}⏤͟͞𝗦𝗔𝗙𝗘 𝗠𝗢𝗗𝗘 🚨 "
+
+    SELINUX=$("$bb" cat /sys/fs/selinux/enforce 2>/dev/null)
+    [ "$SELINUX" = "0" ] && STATUS="${STATUS}⏤͟͞𝗦𝗘𝗟𝗜𝗡𝗨𝗫 𝗣𝗘𝗥𝗠𝗜𝗦𝗦𝗜𝗩𝗘 ❌ "
+
+    [ -f "$BRAIN/force-reset" ] && STATUS="${STATUS}⏤͟͞𝗔𝗚𝗥𝗘𝗦𝗦𝗜𝗩𝗘 𝗠𝗢𝗗𝗘 🔥 "
+
+    DESC="${STATUS}•• $MODEL | InitSDK $INITSDK"
   fi
-
-  [ -z "$MODEL" ] && MODEL="Unknown"
-  [ -z "$DEVICE" ] && DEVICE="Unknown"
-  [ -z "$ID" ] && ID="Unknown"
-
-  # Build description
-  DESC="current spoofing indentify: $MODEL ($DEVICE) | ID: $ID"
-
-  # Backup original properties
-  [ ! -f "$BAK" ] && "$bb" cp "$PROP" "$BAK"
 
   # Update description
   "$bb" sed -i '/^description=/d' "$PROP"
@@ -333,20 +346,7 @@ cleanup_gapps_logs() {
 
 download_keybox() {
   MODPATH="${0%/*}"
-  BOX="/data/adb/Box-Brain"
-
-  SCRIPT_DIR="$MODPATH/webroot/common_scripts"
-  UNOFFICIAL="$BOX/disable-default-source"
-  PRIMARY="$SCRIPT_DIR/key.sh"
-  SECONDARY="$SCRIPT_DIR/spectre.sh"
-
-  if [ -f "$UNOFFICIAL" ]; then
-    sh "$SECONDARY" || { sleep 10; exit 1; }
-  else
-    sh "$PRIMARY" || { sleep 10; exit 1; }
-  fi
-
-  echo " "
+  sh "$MODPATH/webroot/common_scripts/autopilot.sh" run-once
 }
 
 update_targets() {
@@ -482,6 +482,8 @@ update_targets() {
   # Install the new target list.
   if mv -f "$TMP" "$TARGET"; then
     success=1
+    # The old list was only a transaction backup; do not leave a copy on the device.
+    [ "$made_backup" -eq 1 ] && rm -f "$BACKUP"
     echo " ✦ Target verification succeed"
     echo " "
   else
@@ -496,35 +498,34 @@ update_targets() {
   [ "$success" -eq 1 ]
 }
 
+# Single source of truth for the spoofed security patch: the SECURITY_PATCH of the
+# active PIF fingerprint (custom.pif.prop). Tricky Store's security_patch.txt must
+# equal it, otherwise DEVICE integrity fails (incident 2026-11-16).
+# Prints YYYY-MM-DD, or returns 1 when the file or value is missing/invalid.
+patch_from_pif() { pif_patch_from_prop "$@"; }
+
+# Policy helpers shared with the boot script (service.d/prop.sh): see pif_policy.sh. Without them nothing is
+# written (fail closed), instead of ignoring the user's Custom-Patch / pif_mode / pif_sync_patch choices.
+_pif_policy="${MODPATH:-/data/adb/modules/playintegrityfix}/pif_policy.sh"
+[ -f "$_pif_policy" ] && . "$_pif_policy"
+unset _pif_policy
+command -v pif_may_write_patch >/dev/null 2>&1 || pif_may_write_patch() { return 1; }
+command -v pif_patch_from_prop >/dev/null 2>&1 || pif_patch_from_prop() { return 1; }
+
 handle_security_patch() {
   local BOX="/data/adb/Box-Brain"
   local LOGDIR="$BOX/Integrity-Box-Logs"
   local PATCH_LOG="$LOGDIR/patch.log"
   local PATCH_FLAG="$BOX/patch"
   local SKIP_FILE="$BOX/skip"
-  local PATCH_FILE="$BOX/patch.txt"
   local PATCH_DATE
+  PATCH_DATE="$(patch_from_pif)" || PATCH_DATE="" # no literal fallback: without a patch in the fingerprint nothing is written
   local PROP_MAIN="ro.build.version.security_patch"
   local FILE_PATH="/data/adb/tricky_store/security_patch.txt"
   local BRAND_PROP
   local CURRENT_PROP
 
-  # Automatically generate current month security patch date
-  PATCH_DATE="$(date '+%Y-%m')-05"
-
   BRAND_PROP="$(getprop ro.product.system.brand)"
-
-  # Ensure Box-Brain directory exists
-  if ! mkdir -p "$BOX" 2>/dev/null; then
-    echo " ✖ Failed to create Box-Brain directory."
-    return 1
-  fi
-
-  # Write automatically generated date to patch.txt
-  if ! echo "$PATCH_DATE" > "$PATCH_FILE"; then
-    echo " ✖ Failed to write patch date to $PATCH_FILE"
-    return 1
-  fi
 
   if ! mkdir -p "${FILE_PATH%/*}" 2>/dev/null; then
     echo " ✖ Failed to create Tricky Store directory."
@@ -540,12 +541,21 @@ handle_security_patch() {
 
     echo " ✦ Updated Patch to Stock"
   else
-    if ! echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$PATCH_LOG"; then
-      echo " ✖ Failed to write security patch configuration."
-      return 1
+    if [ -z "$PATCH_DATE" ]; then
+      echo " ✦ custom.pif.prop has no valid SECURITY_PATCH: the patch is left as it is"
+      echo "Patch handling skipped (no patch in the fingerprint)" >> "$PATCH_LOG"
+      return 0
     fi
 
-    echo " ✦ Spoofed Attestation Patch to $PATCH_DATE"
+    if pif_may_write_patch; then
+      if ! echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$PATCH_LOG"; then
+        echo " ✖ Failed to write security patch configuration."
+        return 1
+      fi
+      echo " ✦ Spoofed Attestation Patch to $PATCH_DATE"
+    else
+      echo " ✦ Patch policy (pif_mode / pif_sync_patch): security_patch.txt is not rewritten"
+    fi
 
     CURRENT_PROP="$(getprop "$PROP_MAIN" | tr -d ' \t\r\n')"
     echo "Current $PROP_MAIN: $CURRENT_PROP" >> "$PATCH_LOG"
@@ -580,10 +590,40 @@ handle_security_patch() {
   echo "" >> "$PATCH_LOG"
 }
 
+# trim_logs [DIR]: keep every log in DIR (default: the module's log directory on /data) below 256 KiB. The scripts append
+# to these files on every boot and every Action press and nothing else ever shrinks them (two stale ones had reached
+# 8.9 MB and 5.6 MB), which is flash wear and a slow storage leak. A log over the limit keeps its last 500 lines;
+# the file is rewritten in place so its owner, mode and SELinux label stay as they were.
+trim_logs() {
+  local dir="${1:-/data/adb/Box-Brain/Integrity-Box-Logs}" f
+  [ -d "$dir" ] || return 0
+  for f in "$dir"/*.log; do
+    [ -f "$f" ] || continue
+    [ "$(wc -c < "$f" 2>/dev/null)" -gt 262144 ] 2>/dev/null || continue
+    if tail -n 500 "$f" > "$f.trim" 2>/dev/null && [ -s "$f.trim" ]; then
+      cat "$f.trim" > "$f" 2>/dev/null
+    fi
+    rm -f "$f.trim"
+  done
+  return 0
+}
+
 # Property Backend Setup
 RESETPROP="resetprop -n"
 PROP_DELETE="resetprop --delete"
 PROP_WAIT="resetprop -w"
+
+# Wait until the system finished booting (max 10 minutes). Never write `$PROP_WAIT sys.boot_completed 0`: Magisk's
+# `resetprop -w NAME 0` waits until the value CHANGES from 0, but resetprop-rs `--wait NAME 0` waits until it EQUALS 0,
+# i.e. forever once the boot is done: service.sh hung on the first line and AutoPilot never started (2026-11-17).
+wait_boot_completed() {
+  _wb=0
+  while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ] && [ "$_wb" -lt 600 ]; do
+    sleep 1
+    _wb=$((_wb + 1))
+  done
+  return 0
+}
 PROP_DELETE_PERSIST="resetprop -p --delete"
 
 COMPACT_SUPPORTED=false
@@ -787,12 +827,38 @@ kill_process() {
   [ -n "$PID" ] && kill -9 $PID 2>/dev/null
 }
 
+# The fingerprint step of the Action button. The AutoPilot engine owns the fingerprint; the legacy
+# generator (osm0sis.sh) is used ONLY when the engine is missing or the user turned the contour off
+# (exit 3 = pif_mode=off). Any other outcome (busy = 4, engine error) must not fall back: osm0sis.sh
+# would replace a good fingerprint with a random one that the denylist never saw.
+refresh_pif_fingerprint() {
+  local scripts="$MODPATH/webroot/common_scripts" rc
+  if [ -x "$scripts/bin/box-autopilot" ]; then
+    sh "$scripts/autopilot.sh" pif-refresh
+    rc=$?
+    if [ "$rc" -eq 3 ]; then
+      sh "$MODPATH/osm0sis.sh" || true
+    fi
+  else
+    sh "$MODPATH/osm0sis.sh" || true
+  fi
+  return 0
+}
+
 restart_google_services() {
   for proc in com.google.android.gms.unstable com.google.android.gms com.android.vending; do
     kill_process "$proc"
   done
 
   echo " ✦ Killed Google Service Processes"
+
+  # A kill alone leaves DroidGuard dead until some app uses it (no fingerprint is spoofed or logged
+  # meanwhile): ask Android to start its service again right away.
+  if command -v am >/dev/null 2>&1; then
+    sleep 1
+    am startservice -n com.google.android.gms/.droidguard.DroidGuardService \
+      -a com.google.android.gms.droidguard.service.PING >/dev/null 2>&1 || true
+  fi
 }
 
 hide_recovery_folders() {

@@ -48,7 +48,7 @@ check_integrity() {
 setup_environment() {
     debug " ✦ Setting up Environment "
     debug " "
-    chmod +x "$SCRIPT/key.sh"
+    chmod 755 "$SCRIPT/bin/box-autopilot" "$SCRIPT/autopilot.sh" "$SCRIPT/key.sh" "$SCRIPT/spectre.sh" || exit 1
     sh "$SCRIPT/key.sh"
     debug " "
 }
@@ -106,6 +106,52 @@ magisk_resetprop_rs() {
                 ;;
         esac
     done
+}
+
+manage_safemode() {
+    local timeout_seconds=60 line
+    
+    ui_print "----------------------------------------"
+    ui_print "        Safemode Configuration"
+    ui_print "----------------------------------------"
+    ui_print " "
+    ui_print "  Safemode prevents certain custom ROM-specific"
+    ui_print "  functions from running on stock ROMs. This is"
+    ui_print "  intended to avoid potentially rare issues such as"
+    ui_print "  bootloops or broken cameras on some devices"
+    ui_print " "
+    ui_print "  Safemode is enabled by default. Disabling it"
+    ui_print "  can help improve Play Integrity results"
+    ui_print " "
+    ui_print "  You can always enable or disable it"
+    ui_print "  later, manually through the WebUI"
+    ui_print " "
+    ui_print "  Volume Up   : Enable Safemode"
+    ui_print "  Volume Down : Disable Safemode"
+    ui_print "  No key press within 60 seconds: Enable by default"
+    ui_print " "
+    ui_print "  Press a volume key to make your choice..."
+    ui_print " "
+    ui_print "----------------------------------------"
+    # No process substitution: Magisk's busybox parses it, but other installer shells (KernelSU/APatch
+    # busybox, toybox sh) may not, and a parse error would abort the whole installer
+    line=$(timeout "$timeout_seconds" getevent -ql 2>/dev/null | awk '/KEY_VOLUME(UP|DOWN)/ {print; exit}')
+
+    if [ -z "$line" ]; then
+        debug " ✦ Timeout: enabling safemode by default"
+        touch "$FLAG/safemode" 2>/dev/null
+        return 0
+    fi
+
+    if echo "$line" | grep -q "KEY_VOLUMEUP"; then
+        touch "$FLAG/safemode" 2>/dev/null
+        debug " ✦ Volume Up pressed: safemode enabled"
+    elif echo "$line" | grep -q "KEY_VOLUMEDOWN"; then
+        rm -f "$FLAG/safemode" 2>/dev/null
+        debug " ✦ Volume Down pressed: safemode disabled"
+    else
+        touch "$FLAG/safemode" 2>/dev/null
+    fi
 }
 
 detect_rom() {
@@ -243,11 +289,11 @@ detect_rom() {
         echo "$TS | ACTION | skip flag created (sensitive stock device)" >> "$LOG_FILE" 2>/dev/null
     fi
 
-    touch "$FLAG/safemode" 2>/dev/null
     echo "$TS | ACTION | safemode flag created" >> "$LOG_FILE" 2>/dev/null
     echo "Result: Stock ROM" >> "$LOG_FILE" 2>/dev/null
     echo "Detection Completed - $(date)" >> "$LOG_FILE" 2>/dev/null
     debug " ✦ ROM type: Stock ROM"
+    manage_safemode
     return 0
 }
 
@@ -342,7 +388,7 @@ display_footer() {
 }
 
 install_module() {
-#    check_integrity
+    # Package verification runs before any bundled helper or content mutation.
     prepare_directories
     handle_module_props
     check_boot_hash
@@ -351,8 +397,11 @@ install_module() {
     cleanup
     setup_blacklist
     setup_status
+    generate_hosts_block
 }
 
+# Verify the extracted package before executing its helpers or changing files.
+check_integrity
 chmod +x "$MODPATH/hello.sh"
 sh "$MODPATH/hello.sh"
 
@@ -371,11 +420,7 @@ echo "
 if [ -f "$MEOW/custom.pif.prop" ]; then
     cp "$MEOW/custom.pif.prop" "$MODPATH/custom.pif.prop"
 elif [ ! -f "$MEOW/service.sh" ]; then
-    if [ "$SDK" -le 31 ]; then
-        cp "$MODPATH/toolkit/legacy.prop" "$MODPATH/custom.pif.prop"
-    else
-        cp "$MODPATH/toolkit/pixelify.prop" "$MODPATH/custom.pif.prop"
-    fi
+    cp "$MODPATH/toolkit/pixelify.prop" "$MODPATH/custom.pif.prop"
 fi
 
 if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
@@ -383,9 +428,12 @@ if [ ! -f "$FLAG/integrity_box_ui_settings" ]; then
 fi
 
 [ -d "$TRICKY/keys" ] && rm -rf "$TRICKY/keys"
-PATCH_DATE="$(cat "$FLAG/patch.txt" 2>/dev/null)"
-[ -z "$PATCH_DATE" ] && PATCH_DATE="$(date '+%Y-%m-05')"
-echo "all=$PATCH_DATE" > "$TRICKY/security_patch.txt"
+if [ ! -f $TRICKY/security_patch.txt ]; then
+# The patch must equal the PIF fingerprint's SECURITY_PATCH. Without a valid one nothing is
+# invented: Tricky Store then simply has no patch override.
+. "$MODPATH/pif_policy.sh"
+INIT_PATCH="$(pif_patch_from_prop "$MODPATH/custom.pif.prop")" && echo "all=$INIT_PATCH" > "$TRICKY/security_patch.txt"
+fi
  
 install_module
 
@@ -675,12 +723,18 @@ cat <<'EOF' > "$boot/prop.sh"
 #!/system/bin/sh
 
 # CONFIG
-PATCH_FILE="/data/adb/Box-Brain/patch.txt"
+# The patch is whatever the active PIF fingerprint declares (one owner of the invariant,
+# security_patch.txt == custom.pif.prop SECURITY_PATCH). There is NO literal fallback: without a valid
+# patch in the fingerprint this script leaves the patch alone.
+PIF_PROP="/data/adb/modules/playintegrityfix/custom.pif.prop"
+PIF_POLICY="/data/adb/modules/playintegrityfix/pif_policy.sh"
+[ -f "$PIF_POLICY" ] && . "$PIF_POLICY"
+PATCH_DATE=""
+command -v pif_patch_from_prop >/dev/null 2>&1 && PATCH_DATE="$(pif_patch_from_prop "$PIF_PROP")"
 FILE_PATH="/data/adb/tricky_store/security_patch.txt"
 SKIP_FILE="/data/adb/Box-Brain/skip"
 LOG_DIR="/data/adb/Box-Brain/Integrity-Box-Logs"
 LOG_FILE="$LOG_DIR/prop_patch.log"
-FALLBACK_DATE="2026-11-05"
 
 writelog() {
     TS="$(date '+%Y-%m-%d %H:%M:%S')"
@@ -692,25 +746,6 @@ abort() {
     writelog "ERROR | $1"
     exit 1
 }
-
-# GET PATCH DATE
-if [ -f "$PATCH_FILE" ]; then
-    PATCH_DATE="$(tr -d ' \t\r\n' < "$PATCH_FILE")"
-    PATCH_SOURCE="patch.txt"
-
-elif [ -f "$FILE_PATH" ]; then
-    PATCH_DATE="$(sed -n 's/^all=//p' "$FILE_PATH" | head -n 1 | tr -d ' \t\r\n')"
-    PATCH_SOURCE="security_patch.txt"
-
-else
-    PATCH_DATE="$FALLBACK_DATE"
-    PATCH_SOURCE="hardcoded fallback"
-fi
-
-# VALIDATE PATCH DATE
-if ! echo "$PATCH_DATE" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'; then
-    abort "Invalid patch date from $PATCH_SOURCE"
-fi
 
 # SAFE MODE CHECK
 if [ -f "/data/adb/Box-Brain/safemode" ]; then
@@ -745,7 +780,7 @@ setprop_safe() {
 
 # START LOG
 writelog "•••••• Starting Security Patch Override ••••••"
-writelog "Selected Patch Date: $PATCH_DATE (Source: $PATCH_SOURCE)"
+writelog "Selected Patch Date: ${PATCH_DATE:-none} (Source: custom.pif.prop)"
 
 # Exit if module is disabled
 if [ -f "/data/adb/modules/playintegrityfix/disable" ]; then
@@ -753,9 +788,31 @@ if [ -f "/data/adb/modules/playintegrityfix/disable" ]; then
     exit 0
 fi
 
-# SAVE PATCH DATE
-mkdir -p "/data/adb/tricky_store"
-echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$LOG_FILE"
+# The user's choices come first: the stock-patch flag means "do not spoof the patch" (file AND properties)
+if [ -f "/data/adb/Box-Brain/patch" ]; then
+    writelog "Stock patch flag is set: leaving the patch alone"
+    exit 0
+fi
+if [ -z "$PATCH_DATE" ]; then
+    writelog "No valid SECURITY_PATCH in custom.pif.prop: leaving the patch alone"
+    exit 0
+fi
+
+# SAVE PATCH DATE (only when the policy allows it, and without touching a file that is already right)
+WRITE_FILE=1
+if command -v pif_may_write_patch >/dev/null 2>&1; then
+    pif_may_write_patch || WRITE_FILE=0
+fi
+if [ "$WRITE_FILE" = 1 ]; then
+    mkdir -p "/data/adb/tricky_store"
+    if grep -qx "all=$PATCH_DATE" "$FILE_PATH" 2>/dev/null; then
+        writelog "security_patch.txt already holds $PATCH_DATE"
+    else
+        echo "all=$PATCH_DATE" > "$FILE_PATH" 2>>"$LOG_FILE"
+    fi
+else
+    writelog "Patch policy (pif_mode / pif_sync_patch): security_patch.txt is not rewritten"
+fi
 
 # APPLY SYSTEM+VENDOR SECURITY PATCH
 if [ -f "$SKIP_FILE" ]; then
@@ -787,13 +844,14 @@ EOF
 ##########################################
 
 # Zygiskless installation 
-if [ -e /sdcard/zygisk ] || [ -f /data/adb/Box-Brain/zygisk ]; then
+if [ -d /sdcard/zygisk ] || [ -f /sdcard/zygisk ] || [ -f /data/adb/Box-Brain/zygisk ]; then
     debug " ✦ Proceeding Zygiskless Installation"
     debug " ✦ Disabled: Zygisk Attestation fallback"
     debug " ✦ Enabled:  Pixel Mode"
-    rm -rf "$FLAG/PIF/skip_json"
-    rm -rf "$FLAG/PIF/skip_key"
-    sed -i 's/^description=.*/description=Pixel Mode 🌱 has been enabled, all zygisk related components has been disabled/' "$MODPATH/module.prop"
+#    rm -rf "$FLAG/PIF/skip_json"
+#    rm -rf "$FLAG/PIF/skip_key"
+    sed -i 's/^description=.*/description=⏤͟͞𝗣𝗜𝗫𝗘𝗟 𝗠𝗢𝗗𝗘 🍋‍🟩 has been enabled, all zygisk related components has been removed/' "$MODPATH/module.prop"
+    sed -i 's/^description=.*/description=⏤͟͞𝗣𝗜𝗫𝗘𝗟 𝗠𝗢𝗗𝗘 🍋‍🟩 has been enabled, all zygisk related components has been removed/' "$MEOW/module.prop"
     rm -rf $MODPATH/app_replace_list.txt \
         $MODPATH/autopif2.sh $MODPATH/classes.dex \
         $MODPATH/common_setup.sh $MODPATH/custom.app_replace_list.txt \

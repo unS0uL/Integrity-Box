@@ -1,11 +1,9 @@
 #!/system/bin/sh
 F="/data/adb/tricky_store/keybox.xml"
-T="/data/adb/tricky_store/keybox.xml.tmp"
 L="/data/adb/Box-Brain/Integrity-Box-Logs/remove.log"
-X="aristotle,socrates,plato,confucius"
 
 log() {
-    if [[ -z "${_L_LOG_INITIALIZED:-}" ]]; then
+    if [ -z "${_L_LOG_INITIALIZED:-}" ]; then
         : > "$L"
         _L_LOG_INITIALIZED=1
     fi
@@ -34,30 +32,6 @@ touch "$L"
     fi
 
     log "Removing leftover files"
-
-Z="$(cat "$F")"
-
-Y=""
-FIRST=1
-IFS=','
-
-for LINE in $(echo "$Z"); do
-    for WORD in $X; do
-        LINE="${LINE//$WORD/}"
-    done
-    if [ "$FIRST" -eq 1 ]; then
-        Y="$LINE"
-        FIRST=0
-    else
-        Y="$Y
-$LINE"
-    fi
-done
-
-IFS="$OLD_IFS"
-
-printf "%s\n" "$Y" > "$T"
-mv "$T" "$F"
 
     log "Deleting known leftover files from my modules..."
     delete_if_exist /data/adb/integrity_box_verify

@@ -49,11 +49,8 @@ TARGETS="
 /sdcard/Download/*_action_log_2026*|file
 "
 
-echo "$TARGETS" | while IFS= read -r line; do
-    [ -z "$line" ] && continue
-    
-    path="${line%|*}"
-    type="${line#*|}"
+# IFS='|' (not ${line%|*}: on mksh a '|' inside a parameter pattern is an alternation and nothing is cut)
+echo "$TARGETS" | while IFS='|' read -r path type; do
     [ -z "$path" ] && continue
     
     if echo "$path" | grep -q '\*'; then

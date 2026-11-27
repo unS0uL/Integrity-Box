@@ -1599,7 +1599,7 @@ async function importKeybox(file) {
     const status = inspectKeyboxXml(xml);
     const encoded = btoa(unescape(encodeURIComponent(xml)));
     const path = "/data/local/tmp/keybox-loader-import-" + Date.now() + ".xml";
-    const command = "mkdir -p /data/local/tmp && printf '%s' " +
+    const command = "rm -f /data/local/tmp/keybox-loader-import-*.xml; mkdir -p /data/local/tmp && printf '%s' " +
       shellQuote(encoded) + " | base64 -d > " + shellQuote(path) +
       " && chmod 600 " + shellQuote(path);
     await runShell(command);
@@ -1775,6 +1775,7 @@ async function setKeybox(destinationKey) {
     const sourceQuoted = shellQuote(source);
     const targetQuoted = shellQuote(target);
     const backupDirQuoted = shellQuote(BACKUP_DIR);
+    const viaEngine = destinationKey === "tricky";
 
     const command = `
       set -e
@@ -1801,16 +1802,40 @@ async function setKeybox(destinationKey) {
         chmod 644 "$backup_file"
       fi
 
-      mkdir -p "$(dirname "$target")"
+      ${viaEngine ? "" : `mkdir -p "$(dirname "$target")"
 
       cp -f "$src" "$target"
-      chmod 644 "$target"
+      chmod 644 "$target"`}
     `;
 
     await runShell(
       "sh -c " + shellQuote(command)
     );
 
+    if (viaEngine) {
+      // The main Tricky Store slot goes through the AutoPilot engine: it validates the keybox, installs it
+      // transactionally and rolls back when the consumer rejects it. The author's backup above stays.
+      // 2>&1: the engine explains a refusal on stderr, the bridge returns only what the command printed
+      let result;
+      try {
+        result = await runShell(
+          "sh /data/adb/modules/playintegrityfix/webroot/common_scripts/autopilot.sh import " + sourceQuoted + " 1 2>&1; printf '\\nIMPORT_EXIT=%s\\n' \"$?\""
+        );
+      } catch (error) {
+        if (error && /timed out/i.test(String(error.message))) {
+          // the bridge gave up after 15 s, the engine did not: do not report a failure that may still turn into a success
+          throw new Error("The import is still running (the check takes longer than 15 s). Look at the AutoPilot status before trying again.");
+        }
+        throw error;
+      }
+      if (!/(?:^|\n)IMPORT_EXIT=0\s*$/.test(String(result))) {
+        throw new Error(String(result).replace(/IMPORT_EXIT=\d+/g, "").trim().slice(0, 160) || "Validation or install failed");
+      }
+    }
+
+    // closeConfirmation() refuses to run while isSetting is true, and it is what deletes the imported copy
+    // of the keybox from /data/local/tmp: release the flag first
+    isSetting = false;
     closeConfirmation();
 
     showToast(
@@ -1823,7 +1848,7 @@ async function setKeybox(destinationKey) {
     console.error("Set keybox failed:", error);
 
     showToast(
-      "Failed to set keybox",
+      (error && error.message) || "Failed to set keybox",
       "error"
     );
 
@@ -1841,6 +1866,13 @@ async function setKeybox(destinationKey) {
 document.getElementById("closePreview").addEventListener("click", closePreview);
 document.getElementById("previewOverlay").addEventListener("click", event => {
   if (event.target.id === "previewOverlay") closePreview();
+});
+
+// leaving the page must not leave the imported copy of a keybox behind
+window.addEventListener("pagehide", () => {
+  if (selectedFile && selectedFile.imported && !isSetting) {
+    runShell("rm -f " + shellQuote(selectedFile.path)).catch(() => {});
+  }
 });
 
 document.getElementById("refreshBtn").addEventListener(
